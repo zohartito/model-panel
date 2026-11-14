@@ -1,0 +1,8 @@
+{
+  "name": "panel",
+  "description": "Fan one question out to every wired frontier model in parallel, cluster their findings by independent lineage, and synthesize. Provider-agnostic: seats are config, not code, and it ships an MCP server so any agent can drive it.",
+  "version": "0.7.0",
+  "author": {
+    "name": "Zohar Tito"
+  }
+}

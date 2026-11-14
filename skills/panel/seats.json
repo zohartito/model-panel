@@ -1,0 +1,473 @@
+{
+  "_readme": "The panel's roster AND its wiring. Each seat is either `cmd` (argv template run as a subprocess; {prompt} and {repo} are substituted, set \"stdin\": true to pipe the prompt instead of passing it as an argument) or `http` (one spec, or a list tried in order until one yields text: url, headers, body with {prompt}/{key} substituted, extract = dotted response paths tried in order, [] meaning first match in a list). key_from fetches a credential without it ever reaching argv or a log: {file, env_key} for dotenv, {file, json_path} for JSON, or {env}. lineage groups seats that are NOT independent voices - same family or same model behind two scaffolds - and the consensus table counts lineages, not seats. default = seated unless --seats/--skip say otherwise. local = self-hosted, seated only with --include-local. serial = runs after the parallel fan-out (shared RAM pool). grade/exam = measured track record, re-measurable with --grade. track (optional) wires the seat to scripts/seat-refresh.py: {provider, match, format} against the models.dev catalog - provider is the models.dev key, match a regex over that provider's ids, format maps the winning id onto the lane's model string ({id} = whole id, {1}..{n} = match groups). Point $PANEL_SEATS at your own copy of this file to run a completely different roster.",
+  "seats": {
+    "codex": {
+      "lineage": "openai",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 52, "measured": "GPT-6.1 Sol (xhigh)", "model": "gpt-6.1-sol"},
+      "note": "OpenAI Codex CLI, sol line at xhigh. Effort policy: xhigh wherever the route offers it, never max; the top level where that is below xhigh. Runs inside --repo (-C) with approvals and sandbox bypassed so it can read the code; remove that flag if you do not want that. Needs `codex login`. seat-refresh follows the sol line.",
+      "track": {"provider": "openai", "match": "^gpt-([0-9.]+)-sol$", "format": "{id}"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["codex", "exec", "-m", "gpt-6.1-sol", "--config", "model_reasoning_effort=\"xhigh\"", "--dangerously-bypass-approvals-and-sandbox", "-C", "{repo}", "-"],
+        "argv_by_mode": {"build": []}
+      }
+    },
+    "gemini": {
+      "lineage": "google",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": null, "note": "The CLI's default Flash model may not be on the leaderboard."},
+      "note": "Gemini CLI with its default model and no effort flag. Off by default: a fallback Google voice. Default model is left unset because explicit pro ids get renamed. Free-tier API keys have small per-model daily quotas and return 429 under load; gemini-flash draws from a separate quota pool. Needs the gemini CLI signed in or given an API key.",
+      "cmd": {
+        "argv": ["gemini", "--skip-trust", "-p", "{prompt}"]
+      }
+    },
+    "gemini-flash": {
+      "lineage": "google",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": 31, "measured": "Gemini 3.8 Flash (high)", "model": "gemini-3.8-flash", "ceiling": true, "note": "The CLI sets no thinking level; AA lists high 31, medium 30, low 22."},
+      "note": "Gemini Flash through the Gemini CLI (-m pins it; flash ids are stable). Same lineage as gemini: redundancy, not a second voice.",
+      "track": {"provider": "google", "match": "^gemini-([0-9.]+)-flash$", "format": "{id}"},
+      "cmd": {
+        "argv": ["gemini", "--skip-trust", "-m", "gemini-3.8-flash", "-p", "{prompt}"]
+      }
+    },
+    "gemini-agy": {
+      "lineage": "google",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": 31, "measured": "Gemini 3.8 Flash (high)", "model": "gemini-3.8-flash-high"},
+      "note": "Gemini Flash at high through the Antigravity CLI (agy), separate from the Gemini CLI's quota. High is the top effort agy offers for Flash. Same Google lineage as the other Gemini seats.",
+      "track": {"provider": "google", "match": "^gemini-([0-9.]+)-flash$", "format": "gemini-{1}-flash-high"},
+      "cmd": {
+        "argv": ["agy", "--model", "gemini-3.8-flash-high", "--effort", "high", "--print", "{prompt}"]
+      }
+    },
+    "gemini-argon": {
+      "lineage": "google",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": 50, "measured": "Gemini 4 Argon (high)", "model": "google/gemini-4-argon#high"},
+      "note": "Gemini 4 Argon through OpenCode with a Google API key, at #high (the top variant this route offers). METERED: billed to your Google API project. Uses the plan agent, not build, because cmd seats run in the caller's cwd and a judge must not edit it. The plan agent alone is not read-only if your OpenCode config allows every tool, so the seat's OPENCODE_CONFIG_CONTENT leaves the plan agent only read/glob/grep, and --standalone makes OpenCode take that environment (its shared background service keeps its own). Off by default: gemini-carbon is the default Google voice; this stays wired as the fallback and the build pilot's Google seat.",
+      "track": {"provider": "google", "match": "^gemini-([0-9.]+)-argon$", "format": "google/{id}#high"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["opencode", "run", "--standalone", "--model", "google/gemini-4-argon#high"],
+        "argv_by_mode": {"diff review": ["--agent", "plan"], "task": ["--agent", "plan"], "build": ["--agent", "build"]},
+        "env": {"OPENCODE_CONFIG_CONTENT": "{\"agent\": {\"plan\": {\"permission\": {\"*\": \"deny\", \"read\": \"allow\", \"glob\": \"allow\", \"grep\": \"allow\"}}}}"}
+      }
+    },
+    "gemini-carbon": {
+      "lineage": "google",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 60, "measured": "Gemini 4 Carbon (high)", "model": "google/gemini-4-carbon#high"},
+      "note": "Gemini 4 Carbon through OpenCode with a Google API key, at #high (the top variant this route offers). The default Google voice. METERED: billed to your Google API project. Same wiring as gemini-argon for the same reason: a standalone server whose plan agent is cut down to read/glob/grep. No build entry.",
+      "track": {"provider": "google", "match": "^gemini-([0-9.]+)-carbon$", "format": "google/{id}#high"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["opencode", "run", "--standalone", "--model", "google/gemini-4-carbon#high"],
+        "argv_by_mode": {"diff review": ["--agent", "plan"], "task": ["--agent", "plan"]},
+        "env": {"OPENCODE_CONFIG_CONTENT": "{\"agent\": {\"plan\": {\"permission\": {\"*\": \"deny\", \"read\": \"allow\", \"glob\": \"allow\", \"grep\": \"allow\"}}}}"}
+      }
+    },
+    "codex-astra": {
+      "lineage": "openai",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 55, "measured": "GPT-6 Astra (xhigh)", "model": "gpt-6-astra"},
+      "note": "OpenAI astra line at xhigh through the Codex CLI. Seated by default because it scores above sol on the Artificial Analysis index. Same lineage as codex: counted once.",
+      "track": {"provider": "openai", "match": "^gpt-([0-9.]+)-astra$", "format": "{id}"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["codex", "exec", "-m", "gpt-6-astra", "--config", "model_reasoning_effort=\"xhigh\"", "--dangerously-bypass-approvals-and-sandbox", "-C", "{repo}", "-"]
+      }
+    },
+    "codex-luna": {
+      "lineage": "openai",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": 23, "measured": "GPT-6 Luna (xhigh)", "model": "gpt-6-luna"},
+      "note": "OpenAI luna line at xhigh through the Codex CLI. Full preset only. Same lineage as codex.",
+      "track": {"provider": "openai", "match": "^gpt-([0-9.]+)-luna$", "format": "{id}"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["codex", "exec", "-m", "gpt-6-luna", "--config", "model_reasoning_effort=\"xhigh\"", "--dangerously-bypass-approvals-and-sandbox", "-C", "{repo}", "-"]
+      }
+    },
+    "kimi-code": {
+      "lineage": "moonshot",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": null, "note": "kimi-for-coding (K2.8 Preview) is not on the leaderboard."},
+      "note": "kimi-for-coding, Moonshot's code-tuned managed alias (versionless and updated server-side, so no track block). Same lineage as kimi.",
+      "cmd": {
+        "argv": ["kimi", "-p", "{prompt}", "-m", "kimi-code/kimi-for-coding"],
+        "env": {"KIMI_MODEL_THINKING_EFFORT": "high"}
+      }
+    },
+    "copilot": {
+      "lineage": "copilot-auto",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": null, "note": "Auto picks the model per request, so no single score applies."},
+      "note": "GitHub Copilot CLI with model 'auto', which routes across families per request: treat its verdict as a weak extra voice, never a tiebreaker. Each run spends Copilot credits. No effort flag (Copilot rejects --reasoning-effort with model auto); --auto-tier intelligence is the top lever. Some plans refuse pinned models, which is why this seat uses auto.",
+      "cmd": {
+        "argv": ["copilot", "-p", "{prompt}", "--model", "auto", "--auto-tier", "intelligence", "--no-color"]
+      }
+    },
+    "mimo-flash-free": {
+      "lineage": "xiaomi",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": 27, "measured": "MiMo-V2.6-Flash", "model": "opencode/mimo-v2.6-flash-free", "note": "Free OpenCode route of the same model."},
+      "note": "MiMo Flash through OpenCode Zen's free tier. Zero cost, free preset only. Free-tier data terms are not verified: public context only. This route serves no reasoning variants.",
+      "track": {"provider": "opencode", "match": "^mimo-v([0-9.]+)-flash-free$", "format": "opencode/{id}"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["opencode", "run", "-m", "opencode/mimo-v2.6-flash-free", "--agent", "plan", "--standalone"],
+        "env": {"OPENCODE_CONFIG_CONTENT": "{\"agent\": {\"plan\": {\"permission\": {\"*\": \"deny\", \"read\": \"allow\", \"glob\": \"allow\", \"grep\": \"allow\"}}}}"}
+      }
+    },
+    "opencode-free": {
+      "lineage": "nvidia",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": 14, "measured": "Nemotron 3.5 Super VL", "model": "opencode/nemotron-3.5-super-vl-free#xhigh"},
+      "note": "Nemotron through OpenCode's free tier. Tracks Ultra/Super VL releases and verifies each change live. Trial terms: NVIDIA may retain prompts for product improvement, so public context only. Runs #xhigh.",
+      "track": {"provider": "opencode", "match": "^nemotron-([0-9.]+)-(ultra|super-vl)-free$", "format": "opencode/{id}#xhigh"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["opencode", "run", "-m", "opencode/nemotron-3.5-super-vl-free#xhigh", "--agent", "plan", "--standalone"],
+        "env": {"OPENCODE_CONFIG_CONTENT": "{\"agent\": {\"plan\": {\"permission\": {\"*\": \"deny\", \"read\": \"allow\", \"glob\": \"allow\", \"grep\": \"allow\"}}}}"}
+      }
+    },
+    "glm-flash-free": {
+      "lineage": "zhipu",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": null, "note": "GLM-5.3-Flash is listed without an intelligence score."},
+      "note": "GLM Flash through OpenCode's free tier. No quality grade. OpenCode documents zero retention and no training for this endpoint; free availability is temporary. #high is its top variant.",
+      "track": {"provider": "opencode", "match": "^glm-([0-9.]+)-flash-free$", "format": "opencode/{id}#high"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["opencode", "run", "-m", "opencode/glm-5.3-flash-free#high", "--agent", "plan", "--standalone"],
+        "env": {"OPENCODE_CONFIG_CONTENT": "{\"agent\": {\"plan\": {\"permission\": {\"*\": \"deny\", \"read\": \"allow\", \"glob\": \"allow\", \"grep\": \"allow\"}}}}"}
+      }
+    },
+    "deepseek-flash-free": {
+      "lineage": "deepseek",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": null, "note": "AA scores only the 1017 snapshot (max, 32); this free route's V4.1 Flash is dated 2026-09-10 in the catalog and runs at high."},
+      "note": "DeepSeek Flash through OpenCode's free tier. No quality grade. OpenCode documents zero retention and no training for this endpoint; free availability is temporary. #high is its top variant.",
+      "track": {"provider": "opencode", "match": "^deepseek-v([0-9.]+)-flash-free$", "format": "opencode/{id}#high"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["opencode", "run", "-m", "opencode/deepseek-v4.1-flash-free#high", "--agent", "plan", "--standalone"],
+        "env": {"OPENCODE_CONFIG_CONTENT": "{\"agent\": {\"plan\": {\"permission\": {\"*\": \"deny\", \"read\": \"allow\", \"glob\": \"allow\", \"grep\": \"allow\"}}}}"}
+      }
+    },
+    "mimo-ultraspeed": {
+      "lineage": "xiaomi",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": 30, "measured": "MiMo-V2.6-Pro", "model": "mimo-v2.6-pro-ultraspeed", "note": "Ultraspeed is a faster serving of V2.6 Pro; same weights assumed."},
+      "note": "MiMo Pro UltraSpeed through Xiaomi's API, thinking enabled. Reuses the Xiaomi API key saved by OpenCode (connect Xiaomi there). Opt-in with --seats mimo-ultraspeed; metered. The account needs UltraSpeed access. Public context until the service's data terms are verified.",
+      "track": {"provider": "xiaomi", "match": "^mimo-v([0-9.]+)-pro-ultraspeed$", "format": "{id}"},
+      "http": {
+        "url": "https://api.xiaomimimo.com/v1/chat/completions",
+        "key_from": {"file": "~/.local/share/opencode/auth.json", "json_path": "xiaomi.key"},
+        "headers": {"api-key": "{key}", "Content-Type": "application/json"},
+        "body": {"model": "mimo-v2.6-pro-ultraspeed", "messages": [{"role": "user", "content": "{prompt}"}], "thinking": {"type": "enabled"}, "max_completion_tokens": 32768, "stream": false},
+        "extract": ["choices[0].message.content"]
+      }
+    },
+    "kimi": {
+      "lineage": "moonshot",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 46, "measured": "Kimi K3.1 Pro", "model": "kimi-code/k3.1-pro", "note": "AA gives no effort label; the seat pins high, K3.1 Pro's default."},
+      "note": "Newest Kimi K/Pro model through the Kimi CLI, upgraded only after a live check. The CLI has no effort flag, so the seat's env KIMI_MODEL_THINKING_EFFORT=high pins it (the model offers low/high/max; max is off-limits by policy).",
+      "track": {"provider": "moonshotai", "match": "^kimi-k([0-9.]+)(-pro)?$", "format": "kimi-code/k{1}{2}"},
+      "cmd": {
+        "argv": ["kimi", "-p", "{prompt}", "-m", "kimi-code/k3.1-pro"],
+        "env": {"KIMI_MODEL_THINKING_EFFORT": "high"}
+      }
+    },
+    "grok": {
+      "lineage": "xai",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 34, "measured": "Grok 4.7 (xhigh)", "model": "grok-4.7", "note": "AA has high at 35, so xhigh buys nothing measurable here."},
+      "note": "Newest grok line at xhigh effort through the grok CLI (version auto-bumped by seat-refresh). Needs a one-time `grok` login.",
+      "track": {"provider": "xai", "match": "^grok-([0-9]+\\.[0-9]+)$", "format": "{id}"},
+      "cmd": {
+        "argv": ["grok", "-p", "{prompt}", "-m", "grok-4.7", "--effort", "xhigh"],
+        "argv_by_mode": {
+          "diff review": ["--disallowed-tools", "run_terminal_command,run_terminal_cmd,read_file,grep,list_dir,search_replace,web_search,web_fetch,Agent", "--deny", "Bash", "--deny", "Read", "--deny", "MCPTool", "--rules", "Review only the attached prompt. Do not inspect the working tree. End with the exact final line the prompt asks for, then the FINDINGS_JSON block."],
+          "task": ["--disallowed-tools", "run_terminal_command,run_terminal_cmd,search_replace,web_search,web_fetch,Agent", "--rules", "Answer only the attached prompt. You may open a file the prompt attaches by path; do not otherwise inspect the working tree. End with the exact final line the prompt asks for, then the FINDINGS_JSON block."]
+        }
+      }
+    },
+    "cursor-grok": {
+      "lineage": "xai",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 34, "measured": "Grok 4.7 (xhigh)", "model": "grok-4.7-xhigh"},
+      "note": "Same model as `grok`, different scaffold: deliberate redundancy, NOT an independent voice. -f trusts the cwd; review prompts execute no tools. Cursor names grok models without a `cursor-` prefix and with the effort in the id, so the track format is grok-{1}-xhigh.",
+      "track": {"provider": "xai", "match": "^grok-([0-9]+\\.[0-9]+)$", "format": "grok-{1}-xhigh"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["cursor-agent", "-p", "--model", "grok-4.7-xhigh", "--output-format", "text", "-f"]
+      }
+    },
+    "claude-sonnet": {
+      "lineage": "anthropic",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 50, "measured": "Claude Sonnet 5.5 (xhigh with fallback)", "model": "claude-sonnet-5-5"},
+      "note": "Newest Sonnet at xhigh through the Claude Code CLI in print mode. Effort policy: xhigh wherever the route offers it, never max. Needs a one-time `claude /login`.",
+      "track": {"provider": "anthropic", "match": "^claude-sonnet-([0-9]+(-[0-9]+)?)$", "format": "{id}"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["claude", "-p", "--model", "claude-sonnet-5-5", "--effort", "xhigh"]
+      }
+    },
+    "claude-opus": {
+      "lineage": "anthropic",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 57, "measured": "Claude Opus 5.5 (xhigh with fallback)", "model": "claude-opus-5-5"},
+      "note": "Newest Opus at xhigh, same lane (version auto-bumped by seat-refresh).",
+      "track": {"provider": "anthropic", "match": "^claude-opus-([0-9]+(-[0-9]+)?)$", "format": "{id}"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["claude", "-p", "--model", "claude-opus-5-5", "--effort", "xhigh"]
+      }
+    },
+    "claude-fable": {
+      "lineage": "anthropic",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 62, "measured": "Claude Fable 5.2 (xhigh), Intelligence Index v5.0.1, read 2026-11-09", "model": "claude-fable-5-2"},
+      "note": "Newest Fable at xhigh, same lane (version auto-bumped by seat-refresh).",
+      "track": {"provider": "anthropic", "match": "^claude-fable-([0-9]+(-[0-9]+)?)$", "format": "{id}"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["claude", "-p", "--model", "claude-fable-5-2", "--effort", "xhigh"],
+        "argv_by_mode": {"build": ["--permission-mode", "acceptEdits", "--allowedTools", "Bash,Read,Edit,Write,Glob,Grep"]}
+      }
+    },
+    "claude-haiku": {
+      "lineage": "anthropic",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": null, "note": "Not a voting seat: the panel's merge judge (see the top-level merge block)."},
+      "note": "Claude Haiku at xhigh: the fast merge judge that proposes which consensus rows state the same claim. Never seated by default. Same Claude Code lane as the other Claude seats.",
+      "track": {"provider": "anthropic", "match": "^claude-haiku-([0-9]+(-[0-9]+)?)$", "format": "{id}"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["claude", "-p", "--model", "claude-haiku-5-5", "--effort", "xhigh"]
+      }
+    },
+    "muse": {
+      "lineage": "meta",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 43, "measured": "Muse Wonder (max)", "model": "muse-wonder-1.0", "ceiling": true, "note": "AA lists max only; the seat runs xhigh."},
+      "note": "Muse Wonder through the signed-in Muse CLI at xhigh (the CLI offers none..ultra). Subscription quota windows apply.",
+      "track": {"provider": "meta", "match": "^muse-wonder-([0-9.]+)$", "format": "{id}"},
+      "cmd": {
+        "argv": ["muse", "exec", "--model", "muse-wonder-1.0", "--reasoning-effort", "xhigh", "{prompt}"]
+      }
+    },
+    "glm": {
+      "lineage": "zhipu",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 32, "measured": "GLM-5.3 (max)", "model": "glm-5.3", "ceiling": true, "note": "The seat runs high (max is off-limits); AA lists only max 32 and low 23."},
+      "note": "GLM on an Alibaba Model Studio (international) API key - a standard key, not a Token Plan key (see hard rule 7). Check Model Studio for free quota; after it runs out, calls bill pay-as-you-go unless you enable Stop-on-Exhaust. Sometimes spends the whole budget inside reasoning and leaves content empty, hence the reasoning_content fallback. Streams, so a request the service accepts and never answers fails after panel.STREAM_IDLE_TIMEOUT and is retried instead of holding the seat for the whole budget. reasoning_effort high: Model Studio accepts only low/high/max for GLM, and max is excluded by policy.",
+      "track": {"provider": "zhipuai", "match": "^glm-([0-9.]+)$", "format": "{id}"},
+      "http": {
+        "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "key_from": {"file": "~/.qwen/settings.json", "json_path": "env.DASHSCOPE_API_KEY"},
+        "headers": {"Authorization": "Bearer {key}", "Content-Type": "application/json"},
+        "body": {"model": "glm-5.3", "messages": [{"role": "user", "content": "{prompt}"}], "max_tokens": 16000, "enable_thinking": true, "reasoning_effort": "high", "stream": true},
+        "extract": ["choices[0].message.content", "choices[0].message.reasoning_content"]
+      }
+    },
+    "deepseek": {
+      "lineage": "deepseek",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 32, "measured": "DeepSeek V4.1 Flash 1017 (max)", "model": "deepseek-v4.1-flash-1017", "ceiling": true, "note": "The seat runs xhigh."},
+      "note": "DeepSeek Flash on the same Model Studio key as glm (standard, not Token Plan; same quota and pay-as-you-go caveat). reasoning_effort xhigh. The track reads the Token-Plan catalog only because it is the one models.dev listing with Model Studio's dated snapshot ids; requests still go to the standard key.",
+      "track": {"provider": "alibaba-token-plan", "match": "^deepseek-v([0-9.]+)-(pro|flash)(-[0-9]{4})?$", "format": "{id}"},
+      "http": {
+        "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "key_from": {"file": "~/.qwen/settings.json", "json_path": "env.DASHSCOPE_API_KEY"},
+        "headers": {"Authorization": "Bearer {key}", "Content-Type": "application/json"},
+        "body": {"model": "deepseek-v4.1-flash-1017", "messages": [{"role": "user", "content": "{prompt}"}], "max_tokens": 16000, "enable_thinking": true, "reasoning_effort": "xhigh", "stream": true},
+        "extract": ["choices[0].message.content", "choices[0].message.reasoning_content"]
+      }
+    },
+    "qwen-max": {
+      "lineage": "alibaba",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": 34, "measured": "Qwen3.8 Max (0902)", "model": "qwen3.8-max-0902", "note": "AA gives no effort label; the seat runs xhigh."},
+      "note": "Qwen Max on the same Model Studio key as glm/deepseek (standard, not Token Plan, so rule 7 does not bar it; same quota and pay-as-you-go caveat). The hosted Alibaba voice; same lineage as the local Qwen seats. reasoning_effort xhigh.",
+      "track": {"provider": "alibaba", "match": "^qwen([0-9.]+)-max(-[0-9]{4})?$", "format": "{id}"},
+      "http": {
+        "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "key_from": {"file": "~/.qwen/settings.json", "json_path": "env.DASHSCOPE_API_KEY"},
+        "headers": {"Authorization": "Bearer {key}", "Content-Type": "application/json"},
+        "body": {"model": "qwen3.8-max-0902", "messages": [{"role": "user", "content": "{prompt}"}], "max_tokens": 16000, "enable_thinking": true, "reasoning_effort": "xhigh", "stream": true},
+        "extract": ["choices[0].message.content", "choices[0].message.reasoning_content"]
+      }
+    },
+    "glm-oc": {
+      "lineage": "zhipu",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": 32, "measured": "GLM-5.3 (max)", "model": "panel-model-studio/glm-5.3", "ceiling": true, "note": "Runs high, like the glm seat."},
+      "note": "In-repo twin of `glm`: the same Alibaba Model Studio model and key, but through OpenCode's plan agent cut down to read/glob/grep (see gemini-argon), so it can open files in the directory panel was launched from ($PWD) instead of seeing only the prompt. Opt-in; no preset. Needs a `panel-model-studio` provider in ~/.config/opencode/opencode.json (endpoint, model list, reasoning_effort high); seat-refresh cannot bump this seat until a new model is added there. --standalone is required: the key and the tool lock reach OpenCode through the environment, and its shared background service keeps the environment it was started with. Loses the HTTP seat's stall retry, max_tokens and reasoning_content fallback.",
+      "track": {"provider": "zhipuai", "match": "^glm-([0-9.]+)$", "format": "panel-model-studio/{id}"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["opencode", "run", "--standalone", "--agent", "plan", "--model", "panel-model-studio/glm-5.3"],
+        "env": {"OPENCODE_CONFIG_CONTENT": "{\"agent\": {\"plan\": {\"permission\": {\"*\": \"deny\", \"read\": \"allow\", \"glob\": \"allow\", \"grep\": \"allow\"}}}}"},
+        "env_from": {"T3_PANEL_DASHSCOPE_API_KEY": {"file": "~/.qwen/settings.json", "json_path": "env.DASHSCOPE_API_KEY"}}
+      }
+    },
+    "deepseek-oc": {
+      "lineage": "deepseek",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": 32, "measured": "DeepSeek V4.1 Flash 1017 (max)", "model": "panel-model-studio/deepseek-v4.1-flash-1017", "ceiling": true, "note": "Runs xhigh, like the deepseek seat."},
+      "note": "In-repo twin of `deepseek`: the same Alibaba Model Studio model and key, but through OpenCode's plan agent cut down to read/glob/grep (see gemini-argon), so it can open files in the directory panel was launched from ($PWD) instead of seeing only the prompt. Opt-in; no preset. Needs a `panel-model-studio` provider in ~/.config/opencode/opencode.json (endpoint, model list, reasoning_effort xhigh); seat-refresh cannot bump this seat until a new model is added there. --standalone is required: the key and the tool lock reach OpenCode through the environment, and its shared background service keeps the environment it was started with. Loses the HTTP seat's stall retry, max_tokens and reasoning_content fallback.",
+      "track": {"provider": "alibaba-token-plan", "match": "^deepseek-v([0-9.]+)-(pro|flash)(-[0-9]{4})?$", "format": "panel-model-studio/{id}"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["opencode", "run", "--standalone", "--agent", "plan", "--model", "panel-model-studio/deepseek-v4.1-flash-1017"],
+        "env": {"OPENCODE_CONFIG_CONTENT": "{\"agent\": {\"plan\": {\"permission\": {\"*\": \"deny\", \"read\": \"allow\", \"glob\": \"allow\", \"grep\": \"allow\"}}}}"},
+        "env_from": {"T3_PANEL_DASHSCOPE_API_KEY": {"file": "~/.qwen/settings.json", "json_path": "env.DASHSCOPE_API_KEY"}}
+      }
+    },
+    "qwen-max-oc": {
+      "lineage": "alibaba",
+      "default": false,
+      "grade": "?",
+      "intelligence": {"score": 34, "measured": "Qwen3.8 Max (0902)", "model": "panel-model-studio/qwen3.8-max-0902", "note": "AA gives no effort label; runs xhigh, like the qwen-max seat."},
+      "note": "In-repo twin of `qwen-max`: the same Alibaba Model Studio model and key, but through OpenCode's plan agent cut down to read/glob/grep (see gemini-argon), so it can open files in the directory panel was launched from ($PWD) instead of seeing only the prompt. Opt-in; no preset. Needs a `panel-model-studio` provider in ~/.config/opencode/opencode.json (endpoint, model list, reasoning_effort xhigh); seat-refresh cannot bump this seat until a new model is added there. --standalone is required: the key and the tool lock reach OpenCode through the environment, and its shared background service keeps the environment it was started with. Loses the HTTP seat's stall retry, max_tokens and reasoning_content fallback.",
+      "track": {"provider": "alibaba", "match": "^qwen([0-9.]+)-max(-[0-9]{4})?$", "format": "panel-model-studio/{id}"},
+      "cmd": {
+        "stdin": true,
+        "argv": ["opencode", "run", "--standalone", "--agent", "plan", "--model", "panel-model-studio/qwen3.8-max-0902"],
+        "env": {"OPENCODE_CONFIG_CONTENT": "{\"agent\": {\"plan\": {\"permission\": {\"*\": \"deny\", \"read\": \"allow\", \"glob\": \"allow\", \"grep\": \"allow\"}}}}"},
+        "env_from": {"T3_PANEL_DASHSCOPE_API_KEY": {"file": "~/.qwen/settings.json", "json_path": "env.DASHSCOPE_API_KEY"}}
+      }
+    },
+    "pplx": {
+      "lineage": "perplexity",
+      "default": true,
+      "grade": "?",
+      "intelligence": {"score": null, "note": "Perplexity's Sonar models are not on the leaderboard; seated for search-grounded answers."},
+      "note": "Search-GROUNDED seat: its edge is task-mode research questions where it cites the live web. Metered Perplexity API. Two specs: the current Agent API, then the legacy chat endpoint for older API accounts. Change preset/model here rather than via env vars.",
+      "http": [
+        {
+          "url": "https://api.perplexity.ai/v1/responses",
+          "key_from": {"file": "~/.config/perplexity/env", "env_key": "PPLX_API_KEY"},
+          "headers": {"Authorization": "Bearer {key}", "Content-Type": "application/json"},
+          "body": {"preset": "fast-search", "input": "{prompt}"},
+          "extract": ["output[].content[].text"]
+        },
+        {
+          "url": "https://api.perplexity.ai/chat/completions",
+          "key_from": {"file": "~/.config/perplexity/env", "env_key": "PPLX_API_KEY"},
+          "headers": {"Authorization": "Bearer {key}", "Content-Type": "application/json"},
+          "body": {"model": "sonar-reasoning-pro", "messages": [{"role": "user", "content": "{prompt}"}], "max_tokens": 4000},
+          "extract": ["choices[0].message.content"]
+        }
+      ]
+    },
+    "local": {
+      "lineage": "alibaba",
+      "default": false,
+      "local": true,
+      "grade": "?",
+      "intelligence": {"score": 20, "measured": "Qwen3.8 27B (xhigh)", "model": "hf.co/unsloth/Qwen3.8-27B-GGUF:Q4_K_M", "ceiling": true, "note": "A local Q4 quant with no effort setting, so expect lower."},
+      "note": "Qwen3.8-27B Q4_K_M on a SECOND machine running Ollama (for example a GPU desktop on your LAN or VPN). Replace OLLAMA_HOST in the url with that machine's hostname or IP; until then this opt-in seat fails to connect. A thinking model: give it num_predict headroom. Tripwire, not a vote.",
+      "http": {
+        "url": "http://OLLAMA_HOST:11434/api/generate",
+        "body": {"model": "hf.co/unsloth/Qwen3.8-27B-GGUF:Q4_K_M", "prompt": "{prompt}", "stream": false, "options": {"temperature": 0, "num_predict": 4096}},
+        "extract": ["response"]
+      }
+    },
+    "local-mac": {
+      "lineage": "google",
+      "default": false,
+      "local": true,
+      "grade": "?",
+      "intelligence": {"score": null, "note": "Gemma 4 31B is listed without an intelligence score."},
+      "note": "gemma4:31b-65k on this machine's Ollama (needs a large unified-memory Mac or a big GPU). Same lineage as the hosted `gemini` seat: seating both is redundancy, not independence. Tripwire, not a vote.",
+      "http": {
+        "url": "http://127.0.0.1:11434/api/generate",
+        "body": {"model": "gemma4:31b-65k", "prompt": "{prompt}", "stream": false, "options": {"temperature": 0, "num_predict": 2048}},
+        "extract": ["response"]
+      }
+    },
+    "local-27b": {
+      "lineage": "alibaba",
+      "default": false,
+      "local": true,
+      "grade": "?",
+      "intelligence": {"score": 20, "measured": "Qwen3.8 27B (xhigh)", "model": "hf.co/unsloth/Qwen3.8-27B-GGUF:Q4_K_M", "ceiling": true, "note": "A local Q4 quant with no effort setting, so expect lower."},
+      "note": "Qwen3.8-27B Q4_K_M on this machine's Ollama. Traces carefully but is weak at landing verdicts and burns budget thinking, so give it num_predict headroom. Tripwire, not a vote.",
+      "http": {
+        "url": "http://127.0.0.1:11434/api/generate",
+        "body": {"model": "hf.co/unsloth/Qwen3.8-27B-GGUF:Q4_K_M", "prompt": "{prompt}", "stream": false, "options": {"temperature": 0, "num_predict": 8192}},
+        "extract": ["response"]
+      }
+    },
+    "local-glm-air": {
+      "lineage": "zhipu",
+      "default": false,
+      "local": true,
+      "grade": "?",
+      "intelligence": {"score": null, "note": "GLM-4.5-Air is not on the leaderboard."},
+      "note": "GLM-4.5-Air UD-Q2_K_XL on this machine's Ollama, slow - give it timeout headroom. Argues invariants accurately, rarely finds anything new. Alternate tripwire.",
+      "http": {
+        "url": "http://127.0.0.1:11434/api/generate",
+        "body": {"model": "hf.co/unsloth/GLM-4.5-Air-GGUF:UD-Q2_K_XL", "prompt": "{prompt}", "stream": false, "options": {"temperature": 0, "num_predict": 4096}},
+        "extract": ["response"]
+      }
+    }
+  },
+  "presets": {
+    "_readme": "Named rosters for --preset. A preset lists seats explicitly (order preserved); local seats in a preset run WITHOUT --include-local, same as --seats. Lineage counting still applies at synthesis.",
+    "full": ["codex", "codex-astra", "codex-luna", "gemini-carbon", "gemini-argon", "gemini", "gemini-flash", "gemini-agy", "kimi", "kimi-code", "grok", "cursor-grok", "claude-sonnet", "claude-opus", "claude-fable", "muse", "glm", "glm-flash-free", "deepseek", "deepseek-flash-free", "qwen-max", "pplx", "copilot"],
+    "providers": ["claude-fable", "codex", "gemini-carbon", "grok", "kimi", "muse", "glm", "deepseek", "qwen-max", "pplx"],
+    "trio": ["claude-fable", "codex", "gemini-carbon"],
+    "strong": ["claude-fable", "codex-astra", "gemini-carbon", "grok", "kimi", "muse", "glm-flash-free", "deepseek-flash-free"],
+    "_quick": "quick = the fastest measured seat of six lineages (median 1.5-5.5 min per seat over 91 runs, audit 2026-11-09). No Claude seat: each has an 11+ min median. The tier --escalate starts from, so every seat in it must be default-on: gemini-carbon took gemini-argon's slot on 2026-11-10 and its own median is not measured yet.",
+    "quick": ["muse", "deepseek", "cursor-grok", "gemini-carbon", "codex-astra", "kimi"],
+    "free": ["gemini-flash", "copilot", "opencode-free", "mimo-flash-free", "glm-flash-free", "deepseek-flash-free", "local-27b"]
+  },
+  "merge": {
+    "_readme": "Semantic merge pass (audit 2026-11-09). After a run lands, `judge` (a seat name) reads the consensus rows and proposes which ones state the same claim. Proposals never add to a row's counted lineages: they show as `+N likely`, and the absorbed rows stay listed under the table. Guards still apply: rows naming different places, opposite-polarity rows, and rows sharing a seat never merge. `--no-merge` skips it.",
+    "judge": "claude-haiku",
+    "timeout": 600,
+    "max_items": 200
+  },
+  "intelligence": {
+    "_readme": "Source of each seat's `intelligence` block: {score, measured = the leaderboard row it came from (model and effort), model = the pin it was measured on, ceiling = measured at a higher effort than the seat runs, note}. A score whose model no longer matches the pin reads as stale. Re-read the leaderboard after seat-refresh bumps a model. Scores weigh judgment calls; they never mute a family.",
+    "index": "Artificial Analysis Intelligence Index v5.0",
+    "url": "https://artificialanalysis.ai/leaderboards/models",
+    "as_of": "2026-10-29"
+  }
+}

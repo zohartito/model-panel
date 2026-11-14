@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+  pull-requests: read
+jobs:
+  test:
+    name: unittest (python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+        fetch-depth: 0
+    - name: Run gitleaks
+      if: ${{ matrix.python == '3.12' }}
+      uses: gitleaks/gitleaks-action@v3
+      env:
+          # No GITLEAKS_LICENSE needed: gitleaks-action is free for personal
+          # (non-organization) GitHub accounts.
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: ${{ matrix.python }}
+
+    - name: Check Python syntax
+      run: python -m compileall -q skills tests
+
+      # The suite is stdlib-only by design (every seat is faked, no real
+      # model calls), so there is nothing to pip install here.
+    - name: Run unittest suite
+      env:
+        PYTHONUNBUFFERED: "1"
+      run: python -m unittest discover -s tests -v
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true

@@ -1,0 +1,31 @@
+{
+  "_readme": "Minimal two-seat roster: one provider (OpenRouter), one API key, two model families, so the consensus table can count two independent lineages. Use it with PANEL_SEATS=examples/seats.openrouter-two-seat.json. The key is read from the OPENROUTER_API_KEY environment variable and never written anywhere. Both model ids were listed by https://openrouter.ai/api/v1/models on 2026-11-14; replace them with current ids from that list when they change, and keep each seat's lineage equal to the lab that trained the model.",
+  "seats": {
+    "or-openai": {
+      "lineage": "openai",
+      "default": true,
+      "grade": "?",
+      "note": "An OpenAI model through OpenRouter.",
+      "http": {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "key_from": {"env": "OPENROUTER_API_KEY"},
+        "headers": {"Authorization": "Bearer {key}", "Content-Type": "application/json"},
+        "body": {"model": "openai/gpt-6.1-sol", "messages": [{"role": "user", "content": "{prompt}"}]},
+        "extract": ["choices[0].message.content"]
+      }
+    },
+    "or-anthropic": {
+      "lineage": "anthropic",
+      "default": true,
+      "grade": "?",
+      "note": "An Anthropic model through OpenRouter.",
+      "http": {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "key_from": {"env": "OPENROUTER_API_KEY"},
+        "headers": {"Authorization": "Bearer {key}", "Content-Type": "application/json"},
+        "body": {"model": "anthropic/claude-sonnet-5.5", "messages": [{"role": "user", "content": "{prompt}"}]},
+        "extract": ["choices[0].message.content"]
+      }
+    }
+  }
+}

@@ -1,0 +1,114 @@
+{
+ "codex": [
+  {
+   "file": "/home/user/projects/demo-video/assets/2026-08-13-agent-bus/qa/final-inspect/t10.5.png",
+   "line": null,
+   "claim": "Cursor's statement that Codex still needs to post done contradicts the completed PASS evidence already visible on the left.",
+   "severity": "medium"
+  }
+ ],
+ "codex-terra": [
+  {
+   "file": "/home/user/projects/demo-video/assets/2026-08-13-agent-bus/qa/final-inspect/t11.4.png",
+   "line": null,
+   "claim": "The right-pane recap says Codex still needs to post done while the left pane shows PASS, creating a visible contradiction in the final hold.",
+   "severity": "high"
+  }
+ ],
+ "codex-luna": [
+  {
+   "file": "assets/2026-08-13-agent-bus/qa/final-inspect/t10.5.png",
+   "line": null,
+   "claim": "The left shows verdict PASS while the right recap says Codex still needs to post done, creating a contradictory final state.",
+   "severity": "high"
+  }
+ ],
+ "kimi": [
+  {
+   "file": "assets/2026-08-13-agent-bus/qa/final-inspect/t11.4.png",
+   "line": null,
+   "claim": "The final held frame and poster end on Cursor's readable prose line 'Codex still needs to post their done for the channel to show complete' while the left pane already shows done + status PASS in the same frame, inverting the payoff in the only pane a phone viewer can read.",
+   "severity": "high"
+  }
+ ],
+ "grok": [
+  {
+   "file": "assets/2026-08-13-agent-bus/qa/final-inspect/t11.4.png",
+   "line": null,
+   "claim": "Cursor's closer 'Codex still needs to post their done' contradicts the left pane's already-posted verdict PASS; the poster is this frame.",
+   "severity": "high"
+  }
+ ],
+ "cursor-grok": [
+  {
+   "file": "assets/2026-08-13-agent-bus/qa/final-inspect/t8.5.png",
+   "line": null,
+   "claim": "The t8.5 both-on-recv beat makes both panes look busy at once and reintroduces the two-chats read this take was shot to avoid.",
+   "severity": "high"
+  },
+  {
+   "file": "assets/2026-08-13-agent-bus/agent-bus-roundtrip-final-poster.png",
+   "line": null,
+   "claim": "Poster is identical to t11.4; Cursor's last line says Codex still needs to post done while left already shows bus.py done and status verdict PASS.",
+   "severity": "high"
+  }
+ ],
+ "claude-sonnet": [
+  {
+   "file": "assets/2026-08-13-agent-bus/qa/final-inspect/t4.5.png",
+   "line": null,
+   "claim": "The SEND beat (export clock ~3.5-5.7s) is the exact point causality still reads ambiguous: both panes show changed pixels in the same instant (Codex's new paragraph + Working status vs Cursor's elapsed-timer digit jumping on an otherwise identical recv --wait line), reproducing the 'both panes look busy at once' failure the reshoot was meant to fix, just less severely.",
+   "severity": "high"
+  },
+  {
+   "file": "assets/2026-08-13-agent-bus/qa/final-inspect/t10.5.png",
+   "line": null,
+   "claim": "In the PASS beat, Cursor's pane displays a stale closing line ('Codex still needs to post their done for the channel to show complete') in the same frame where Codex's own pane already shows done+status both returning verdict PASS twice \u2014 a direct, catchable contradiction for any viewer who reads both panes in the final hold.",
+   "severity": "medium"
+  }
+ ],
+ "claude-opus": [
+  {
+   "file": "assets/2026-08-13-agent-bus/agent-bus-roundtrip-final-poster.png",
+   "line": null,
+   "claim": "The poster is byte-for-perceptual-pixel the t11.4 PASS hold (mean-abs-diff 0.000), which is the one frame where the left pane shows verdict PASS while the right pane reads 'Codex still needs to post their done for the channel to show complete' - the most-viewed frame in non-autoplay contexts is the self-contradicting one.",
+   "severity": "high"
+  }
+ ],
+ "claude-fable": [
+  {
+   "file": "assets/2026-08-13-agent-bus/agent-bus-roundtrip-final.mp4",
+   "line": null,
+   "claim": "Throughout the 3s PASS hold the right pane's final line 'Codex still needs to post their done for the channel to show complete' directly contradicts the left pane's on-screen status verdict PASS; no allowed edit removes it, so pre-empt it in the self-reply with the complete:true receipt.",
+   "severity": "medium"
+  },
+  {
+   "file": "assets/2026-08-13-agent-bus/agent-bus-roundtrip-final.mp4",
+   "line": null,
+   "claim": "Monotonic on-screen counters across beats (right tokens 1.43k\u21922.17k, context 10.3%\u219211.5%, left Working 2s\u219250s) visibly corroborate the not-reordered claim.",
+   "severity": "low"
+  }
+ ],
+ "muse": [
+  {
+   "file": "qa/final-inspect/t10.5.png",
+   "line": null,
+   "claim": "verdict PASS JSON readable only on pause; right prose contradicts it with stale line Codex still needs to post done",
+   "severity": "high"
+  }
+ ],
+ "glm": [
+  {
+   "file": "agent-bus-roundtrip-final.mp4",
+   "line": null,
+   "claim": "t4.5 send frame shows right pane Running 1.43k tokens while left is Working (2s), making both panes look busy at once",
+   "severity": "high"
+  },
+  {
+   "file": "qa/final-inspect/t11.4.png",
+   "line": null,
+   "claim": "Cursor recap line says Codex still needs to post done, directly contradicting left's already-posted PASS",
+   "severity": "medium"
+  }
+ ]
+}

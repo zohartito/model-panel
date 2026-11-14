@@ -1,0 +1,8 @@
+# No package manifest in this repo (the suite is stdlib-only), so there is
+# nothing for a pip/npm ecosystem to track — watch the GitHub Actions we run.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

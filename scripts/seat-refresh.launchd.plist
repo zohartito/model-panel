@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Optional macOS launchd job: runs seat-refresh four times a day.
+  This is a TEMPLATE. launchd does not expand ~ or $HOME in the path keys, so
+  replace both placeholders with absolute paths before loading it:
+    __PANEL_REPO__  the panel checkout, e.g. /Users/you/src/panel
+    __PANEL_RUNS__  the run root (default ~/panel-runs), e.g. /Users/you/panel-runs
+  See README.md ("Keeping model versions current") for the install commands.
+  Edit the PATH below so it contains the directories your model CLIs live in.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.panel.seat-refresh</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>export PATH="$HOME/.grok/bin:$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:$HOME/.pyenv/shims:/usr/local/bin:/usr/bin:/bin"; echo "== $(date)"; exec python3 __PANEL_REPO__/scripts/seat-refresh.py --apply --notify</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>25</integer></dict>
+    <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>25</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>25</integer></dict>
+    <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>25</integer></dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>__PANEL_RUNS__/_seat-refresh.log</string>
+  <key>StandardErrorPath</key>
+  <string>__PANEL_RUNS__/_seat-refresh.log</string>
+  <key>WorkingDirectory</key>
+  <string>__PANEL_REPO__</string>
+</dict>
+</plist>

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+panel-runs/
+*.log
+.codegraph/
+skills/panel/seats.json.bak
+.claude/LEARNINGS.md
+.handoff/

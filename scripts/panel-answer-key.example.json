@@ -1,0 +1,17 @@
+{
+  "_comment": "Answer key for panel_grade — the eval for the on-tag loop. Fill 'defects' with the KNOWN issues in a release diff (e.g. from a postmortem or a seeded review), then grade a run against it to measure which seats/lineages actually catch them. Copy this per release into ~/panel-runs/_on-tag/<repo>/<tag>/answer-key.json and point --key at it.",
+  "defects": [
+    {
+      "id": "example-off-by-one",
+      "file": "path/to/changed_file.py",
+      "keywords": ["off-by-one", "range", "boundary", "index"],
+      "desc": "The loop bound excludes the final element, dropping the last row."
+    },
+    {
+      "id": "example-unhandled-none",
+      "file": "path/to/other_file.py",
+      "keywords": ["None", "null", "AttributeError", "missing key"],
+      "desc": "Return value can be None and is dereferenced without a guard."
+    }
+  ]
+}

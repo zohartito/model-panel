@@ -1,0 +1,31 @@
+{
+  "name": "panel",
+  "owner": {
+    "name": "Zohar Tito"
+  },
+  "metadata": {
+    "description": "Multi-model panel of judges for high-stakes reviews and judgement calls.",
+    "version": "0.7.0"
+  },
+  "plugins": [
+    {
+      "name": "panel",
+      "source": "./",
+      "description": "Fan one question out to every wired frontier model in parallel (codex gpt-6.1-sol, gemini 4 carbon, kimi k3.1 pro, grok 4.7 via two scaffolds, muse wonder, glm, deepseek, qwen 3.8 max, three Claude seats, perplexity; xhigh effort wherever a route offers it), persist each answer the moment it lands, cluster findings by how many INDEPENDENT lineages agree, and synthesize. Resumable, gradeable against an answer key, and it remembers accepted residuals across rounds.",
+      "version": "0.7.0",
+      "author": {
+        "name": "Zohar Tito"
+      },
+      "category": "development",
+      "keywords": [
+        "code-review",
+        "multi-model",
+        "ensemble",
+        "consensus",
+        "second-opinion",
+        "eval",
+        "subagent"
+      ]
+    }
+  ]
+}
