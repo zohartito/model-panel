@@ -124,6 +124,45 @@ python3 skills/panel/panel.py --grade <run dir> --key key.json  # score a run ag
 | `--seats a,b` / `--skip a` / `--preset name` | default-on seats | Pick seats for one run. Presets live in `seats.json`. |
 | `--include-local` | off | Also seat the self-hosted Ollama seats. |
 | `--timeout` | 2400 s | Per-seat budget. |
+| `--estimate` | off | Preview the plan's billing routes and historical P50/P95 minutes; no calls or run directory. |
+| `--no-metered` | off | Exclude metered, credit and unknown routes, including escalation and the merge judge. |
+| `--allow-unknown SEAT` | none | With `--no-metered`, allow this unknown route with a warning; repeatable. Does not select the seat. |
+
+Preview before running (no task is required):
+
+```bash
+python3 skills/panel/panel.py --estimate
+python3 skills/panel/panel.py --estimate --preset strong --no-metered
+python3 skills/panel/panel.py --estimate --seats gemini-argon
+```
+
+Each seat's `billing` is `subscription`, `metered`, `credit`, or `unknown`.
+These describe the configured route, not the current account balance or
+overage settings. Missing or invalid labels count as `unknown`. Free endpoints,
+local inference, and the Gemini CLI's variable authentication use `unknown`
+because this vocabulary cannot accurately classify them. `--no-metered` and
+its explicit unknown exceptions persist on resume; known metered/credit routes
+cannot be allowed with `--allow-unknown`.
+
+Timing history comes from `$PANEL_RUNS/*/*/run.json` (default `~/panel-runs`).
+The estimator checks the local `ts` against the folder name, then measures
+elapsed time to each planned seat's answer-file mtime. It excludes missing or
+invalid records, negative durations and files written more than 60 seconds
+after the recorded timeout. The one-minute allowance covers cleanup/write
+overhead. P50/P95 use nearest rank: sorted sample at `ceil(percentile * n)`;
+zero samples prints `no history`. Failures are included. The sample count is
+usable observations, not all runs that selected the seat.
+
+These are approximate completion times across tasks and model versions;
+queueing, retries, repairs and edits affect mtimes. Late resumes are excluded,
+but an earlier rewrite is indistinguishable from an original completion.
+The slowest observed P95 is not a whole-run deadline, especially with serial
+or escalation seats. Conditional escalation seats appear in the table; the
+merge judge is disclosed separately. As with a real plan, recently failed
+quota/login routes are skipped unless you pass `--include-dead` or name them
+with `--seats`. `--out` does not change the history root. Estimates apply to new
+plans; combining `--estimate` with resume, grade, verdict or list modes is
+rejected before any write.
 
 Credentials are never stored in this repo. A seat reads its key from an
 environment variable (`"key_from": {"env": "VAR"}`) or from a local file you

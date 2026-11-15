@@ -32,6 +32,8 @@ PANEL=<repo>/skills/panel/panel.py
 python3 "$PANEL" --task "..." --context "..." --criteria "..." --json
 python3 "$PANEL" --diff change.diff --repo /path/to/repo --json
 python3 "$PANEL" --list-seats
+python3 "$PANEL" --estimate                 # billing + P50/P95; launches nothing
+python3 "$PANEL" --estimate --no-metered    # subscription routes only
 python3 "$PANEL" --task "..." --preset strong
 python3 "$PANEL" --task "..." --escalate          # quick tier first, rest on doubt
 python3 "$PANEL" --verdict <run> --finding <id> --mark confirmed|rejected
@@ -75,6 +77,18 @@ rosters skip lanes that failed on quota/login in 24 h (`--include-dead`).
 Cmd seats get one Retry-After retry if the remaining budget allows it.
 Last outcomes: `$PANEL_RUNS/_seat-health.json`, surfaced in the roster.
 **Configured means CLI/key present, not successful live inference.**
+
+`billing` is `subscription`, `metered`, `credit`, or `unknown` per seat.
+`--no-metered` excludes the latter three, including escalation and the merge
+judge; `--allow-unknown SEAT` (repeatable) allows only that unknown route with
+a warning. This policy persists on resume. Free/local routes use `unknown`
+because the billing vocabulary has no free/local category. Account overages
+are not checked. `--estimate` reads `$PANEL_RUNS` (default `~/panel-runs`),
+creates nothing, and needs no task. It reports nearest-rank P50/P95 elapsed
+minutes from local run timestamps to answer mtimes, including failures;
+mismatched folders and mtimes outside 0..timeout+60s are ignored. History can
+span model versions and edited files. `--include-dead` previews the full
+selected roster. Estimates cover new plans, not `--resume`/`--grade`/`--verdict`.
 
 ## Build pilot (not a review)
 

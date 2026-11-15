@@ -80,6 +80,16 @@ Useful flags: `--seats codex,kimi` (only these), `--skip grok` (all but these),
 `--include-local` (add self-hosted tripwires), `--timeout 2400`, `--out DIR`,
 `--round N`, `--no-residuals`, `--json`, `--list-seats`.
 
+Preview a new plan with `--estimate`: billing route, usable history count,
+and nearest-rank P50/P95 elapsed minutes per seat. This launches nothing,
+creates no run folder, and needs no task. History uses `$PANEL_RUNS` and
+excludes answer mtimes later than timeout + 60 seconds; failures count too.
+Use `--no-metered` to exclude metered, credit and unknown routes, including
+escalation and the merge judge. An unknown route requires an explicit,
+repeatable `--allow-unknown SEAT` and prints a warning. Free/local routes
+are conservatively unknown under the current billing vocabulary. Account
+overages are not checked. The billing policy persists on resume.
+
 **Driving it from something other than Claude Code?** `mcp_server.py` next to
 this file speaks MCP over stdio with zero dependencies (`panel_run`,
 `panel_status`, `panel_summary`, `panel_seat`, `panel_resume`, `panel_grade`,
