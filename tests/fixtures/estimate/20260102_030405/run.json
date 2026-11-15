@@ -1,0 +1,9 @@
+{
+  "ts": "20260102_030405",
+  "mode": "task",
+  "question": "Synthetic timing fixture",
+  "round": 1,
+  "planned": ["subscriber"],
+  "timeout": 2400,
+  "completed": true
+}

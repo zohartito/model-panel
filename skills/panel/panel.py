@@ -60,6 +60,7 @@ import datetime
 import errno
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -1991,6 +1992,114 @@ def plan_seats(args, registry):
     return [n for n in chosen if n not in skip]
 
 
+def billing_for(seat, registry):
+    """Unrecognized or absent billing metadata fails closed."""
+    value = registry.get(seat, {}).get("billing")
+    return value if value in ("subscription", "metered", "credit") else "unknown"
+
+
+def filter_billing(names, args, registry):
+    """Apply the same billing policy to seats, escalation and the merge judge."""
+    if not args.no_metered:
+        return list(names)
+    allowed = set(args.allow_unknown)
+    kept = []
+    for name in names:
+        billing = billing_for(name, registry)
+        if billing == "subscription":
+            kept.append(name)
+        elif billing == "unknown" and name in allowed:
+            print(f"WARNING: [{name}] billing is unverified; allowed by "
+                  "--allow-unknown", flush=True)
+            kept.append(name)
+        else:
+            print(f"[{name}] dropped by --no-metered: billing={billing}",
+                  flush=True)
+    return kept
+
+
+# Seat files land just after a timeout while process cleanup finishes. A
+# fixed minute allows that overhead without accepting much later rewrites.
+STATS_MTIME_GRACE = 60
+
+
+def stats_for(seat, runs_root):
+    """Nearest-rank minutes from run start to seat-file mtime, across repos.
+
+    Includes failed attempts as well as successful ones. This is elapsed
+    completion time (including queueing/repair), not model execution time.
+    Resume/edit mtimes beyond timeout + 60 seconds are excluded. Earlier
+    rewrites and model changes cannot be distinguished in legacy metadata.
+    """
+    samples = []
+    if not re.fullmatch(r"[\w-]+", seat):
+        return {"n": 0, "p50": None, "p95": None}
+    for path in Path(runs_root).expanduser().glob("*/*/run.json"):
+        try:
+            meta = json.loads(path.read_text())
+            if not isinstance(meta, dict):
+                continue
+            planned = meta.get("planned")
+            if not isinstance(planned, list) or seat not in planned:
+                continue
+            ts = meta["ts"]
+            if not isinstance(ts, str) or not re.fullmatch(r"\d{8}_\d{6}", ts):
+                continue
+            if not re.fullmatch(re.escape(ts) + r"(?:_\d+)?", path.parent.name):
+                continue
+            # Naive datetime.timestamp uses the machine's local timezone,
+            # matching the local strftime timestamp written by panel.
+            start = datetime.datetime.strptime(ts, "%Y%m%d_%H%M%S").timestamp()
+            timeout = meta["timeout"]
+            if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                    or not math.isfinite(timeout) or timeout <= 0):
+                continue
+            answer = path.parent / f"{seat}.md"
+            if not answer.is_file():
+                continue
+            elapsed = answer.stat().st_mtime - start
+            if math.isfinite(elapsed) and 0 <= elapsed <= timeout + STATS_MTIME_GRACE:
+                samples.append(elapsed / 60)
+        except (OSError, ValueError, TypeError, KeyError, OverflowError):
+            continue  # missing, partial or malformed history is not a sample
+    samples.sort()
+    n = len(samples)
+    return {"n": n,
+            "p50": samples[math.ceil(n * .50) - 1] if n else None,
+            "p95": samples[math.ceil(n * .95) - 1] if n else None}
+
+
+def print_estimate(names, registry, runs_root, rest=(), merge=False):
+    print("Estimate only: no seats launched; no run directory created.")
+    print("seat                   lineage       billing       runs  P50 min  P95 min")
+    observed = []
+    for name in names:
+        stats = stats_for(name, runs_root)
+        history = (f"{stats['p50']:7.2f}  {stats['p95']:7.2f}" if stats["n"]
+                   else "no history")
+        print(f"{name:22} {lineage_of(name, registry):13} "
+              f"{billing_for(name, registry):12} {stats['n']:5}  {history}")
+        if stats["n"]:
+            observed.append((stats["p95"], name))
+    metered = [n for n in names if billing_for(n, registry) == "metered"]
+    print(f"metered seats: {len(metered)} ({', '.join(metered) or 'none'})")
+    if observed:
+        slowest, name = max(observed)
+        print(f"slowest P95: {slowest:.2f} min ({name}; seats with history only)")
+    else:
+        print("slowest P95: no history")
+    if rest:
+        print(f"conditional escalation seats (included above): {', '.join(rest)}")
+    judge = MERGE_CONFIG.get("judge")
+    if merge and judge in PANEL:
+        print(f"conditional merge judge: {judge}, "
+              f"billing={billing_for(judge, registry)} (outside seat table)")
+    print("Approximate elapsed completion times, including failed attempts; "
+          "nearest-rank percentiles. Files later than timeout + 60s are ignored.")
+    print("History spans tasks and model versions; queueing, retries and edits "
+          "can affect mtimes. Slowest P95 is not a whole-run deadline.")
+
+
 _MEDIA_KINDS = {".png": "image", ".jpg": "image", ".jpeg": "image",
                 ".gif": "image", ".webp": "image", ".bmp": "image",
                 ".tiff": "image",
@@ -2328,6 +2437,14 @@ def build_parser():
                          "mutually exclusive with --seats")
     ap.add_argument("--seats", default="",
                     help="run ONLY these seats (comma-separated)")
+    ap.add_argument("--estimate", action="store_true",
+                    help="print billing and historical P50/P95 minutes; "
+                         "launch nothing and create no run directory")
+    ap.add_argument("--no-metered", action="store_true",
+                    help="exclude metered, credit and unknown billing routes")
+    ap.add_argument("--allow-unknown", action="append", default=[], metavar="SEAT",
+                    help="with --no-metered, allow this unknown-billing seat "
+                         "with a warning (repeatable; does not select the seat)")
     ap.add_argument("--include-local", action="store_true",
                     help="also seat the self-hosted models (off by default)")
     ap.add_argument("--repo", type=Path, default=None)
@@ -2386,6 +2503,16 @@ def _main(argv=None):
     repo = (args.repo or Path.cwd()).resolve()
     out_root = Path(args.out) if args.out else default_out(repo)
 
+    if args.estimate and (args.resume or args.grade_dir or args.verdict_dir
+                          or args.list_seats):
+        raise SystemExit("--estimate is for a new plan; do not combine it with "
+                         "--resume, --grade, --verdict or --list-seats")
+    unknown = set(args.allow_unknown) - set(registry)
+    if unknown:
+        raise SystemExit(f"--allow-unknown names unknown seat(s): {', '.join(sorted(unknown))}")
+    if args.allow_unknown and not args.no_metered and not args.resume:
+        raise SystemExit("--allow-unknown requires --no-metered")
+
     if args.list_seats:
         list_seats(registry)
         return 0
@@ -2421,6 +2548,13 @@ def _main(argv=None):
         # same first line as a fresh run: an MCP caller waits for it
         print(f"run dir: {rundir}", flush=True)
         meta = json.loads((rundir / RUN_META).read_text())
+        # Retain a restricted run's policy on resume, including an undecided
+        # escalation tier. Filtering must precede renaming any old answers.
+        args.no_metered = args.no_metered or meta.get("no_metered", False)
+        args.allow_unknown = sorted(set(args.allow_unknown)
+                                    | set(meta.get("allow_unknown", [])))
+        if args.allow_unknown and not args.no_metered:
+            raise SystemExit("--allow-unknown requires --no-metered")
         if not claim_run(rundir) and not args.force:
             raise SystemExit(
                 f"run {rundir} is still in progress (pid {meta.get('pid')}): "
@@ -2439,8 +2573,24 @@ def _main(argv=None):
             prompts["codex"] = codex_file.read_text()
         todo = [n for n in meta["planned"]
                 if seat_status(rundir, n) != (True, 0)]
+        esc = meta.get("escalation") or {}
+        pending_rest = esc.get("rest", []) if not esc.get("decided") else []
+        candidates = list(dict.fromkeys(todo + pending_rest))
+        permitted = set(filter_billing(candidates, args, registry))
+        todo = [n for n in todo if n in permitted]
+        if args.no_metered:
+            meta.update(no_metered=True, allow_unknown=args.allow_unknown)
+            meta["planned"] = [n for n in meta["planned"]
+                               if n not in candidates or n in permitted]
+            if esc:
+                esc["quick"] = [n for n in esc.get("quick", [])
+                                if n in meta["planned"]]
+                esc["rest"] = [n for n in esc.get("rest", [])
+                               if n not in candidates or n in permitted]
         if not todo:
-            print(f"nothing to resume in {rundir}: every seat landed clean")
+            reason = ("no permitted seats need a refill" if args.no_metered
+                      else "every seat landed clean")
+            print(f"nothing to resume in {rundir}: {reason}")
         else:
             # a stale failure file would read as landed while its refill
             # runs; keep it as <seat>.prev.md so status says "running"
@@ -2455,8 +2605,12 @@ def _main(argv=None):
             print(f"resuming {len(todo)} seat(s) in {rundir}: "
                   f"{', '.join(todo)}", flush=True)
         skip = {x.strip() for x in args.skip.split(",") if x.strip()}
-        if args.no_merge or MERGE_CONFIG.get("judge") in skip:
+        judge = MERGE_CONFIG.get("judge")
+        if (args.no_merge or judge in skip
+                or (judge and meta.get("merge", True)
+                    and not filter_billing([judge], args, registry))):
             meta["merge"] = False
+        _atomic_write(rundir / RUN_META, json.dumps(meta, indent=2))
         esc = meta.get("escalation") or {}
         if esc and not esc.get("decided"):
             # interrupted before it decided: refill the quick tier, decide,
@@ -2477,7 +2631,7 @@ def _main(argv=None):
                   f"before acting.")
         return 0
 
-    if bool(args.diff) == bool(args.task):
+    if (args.diff and args.task) or (not args.estimate and not (args.diff or args.task)):
         raise SystemExit("give exactly one of --diff (code review), --task "
                          "(anything else), --resume, --grade or --list-seats")
 
@@ -2492,19 +2646,31 @@ def _main(argv=None):
                  if n in PANEL and n not in skip]
         rest = [n for n in names if n not in quick]
         names = quick
+    permitted = set(filter_billing(names + rest, args, registry))
+    names = [n for n in names if n in permitted]
+    rest = [n for n in rest if n in permitted]
     # Seats named with --seats always run; a roster chosen implicitly (the
     # defaults, a preset) leaves out lanes that just died on quota or login.
     skipped = ({} if args.seats or args.include_dead
                else dead_lanes(names + rest))
     names = [n for n in names if n not in skipped]
     rest = [n for n in rest if n not in skipped]
-    if not names and not rest:
+    if not names and not rest and not args.estimate:
         raise SystemExit("no seats selected" + (
             f" (skipped as dead lanes: {', '.join(skipped)}; pass "
             f"--include-dead to try them)" if skipped else ""))
     for name, why in skipped.items():
         print(f"[{name}] skipped: {why} (name it with --seats, or pass "
               f"--include-dead, to try it anyway)", flush=True)
+
+    judge = MERGE_CONFIG.get("judge")
+    merge = not args.no_merge and judge not in {
+        s.strip() for s in args.skip.split(",") if s.strip()}
+    if merge and judge:
+        merge = bool(filter_billing([judge], args, registry))
+    if args.estimate:
+        print_estimate(names + rest, registry, _runs_root(), rest, merge)
+        return 0
 
     prev = args.prev or _latest_run(out_root)
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2562,8 +2728,10 @@ def _main(argv=None):
             # decides, so no status poll calls the run complete too early
             "planned": names + rest, "timeout": args.timeout,
             "completed": False, "repair": not args.no_repair,
-            "merge": not args.no_merge and MERGE_CONFIG.get("judge") not in {
-                s.strip() for s in args.skip.split(",") if s.strip()}}
+            "merge": merge,
+            "billing": {n: billing_for(n, registry) for n in names + rest}}
+    if args.no_metered:
+        meta.update(no_metered=True, allow_unknown=args.allow_unknown)
     if args.escalate:
         meta["escalation"] = {"quick": names, "rest": rest,
                               "decided": False}
