@@ -4,12 +4,14 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from test_audit_fixes import _load_script
+import panel
 
 
 class InstallerBackupTests(unittest.TestCase):
@@ -130,8 +132,45 @@ class InstallerCliTests(unittest.TestCase):
                          "update")
         self.assertEqual([c[2] for c in self.calls], ["list"])
 
+
     def test_pnl05_matching_command_and_args_are_idempotent(self):
         inst = _load_script("panel-install")
         self.assertEqual(self.install(f'panel: python3 "{inst.SERVER}" - Connected')[0],
                          "ok")
         self.assertEqual([c[2] for c in self.calls], ["list"])
+
+
+class HttpBudgetTests(unittest.TestCase):
+    SPEC = {"url": "http://example.invalid", "body": {}, "extract": ["text"]}
+
+    def test_pnl07_fallbacks_share_one_deadline(self):
+        calls = []
+        def stalled(req, timeout):
+            calls.append(timeout)
+            time.sleep(timeout)
+            raise TimeoutError("timed out")
+        start = time.monotonic()
+        with patch.object(panel.urllib.request, "urlopen", side_effect=stalled):
+            code, text = panel.http_seat([self.SPEC, self.SPEC], "p", "/r", 0.15)
+        self.assertEqual(code, -3)
+        self.assertLess(time.monotonic() - start, 0.25)
+        self.assertEqual(len(calls), 1)
+
+    def test_pnln2_dripping_body_cannot_extend_total_budget(self):
+        class Drip:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def read(self):
+                # Bytes arrive within each socket timeout, but not the total.
+                for _ in range(8):
+                    time.sleep(0.04)
+                return b'{"text": "late answer"}'
+        start = time.monotonic()
+        with patch.object(panel.urllib.request, "urlopen", return_value=Drip()):
+            code, text = panel.http_seat([self.SPEC], "p", "/r", 0.15)
+        elapsed = time.monotonic() - start
+        self.assertEqual(code, -3)
+        self.assertIn("budget", text)
+        self.assertLess(elapsed, 0.25)

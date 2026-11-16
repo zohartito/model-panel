@@ -620,11 +620,51 @@ def _read_sse(resp, deadline):
                                      "reasoning_content": "".join(reasoning)}}]}
 
 
+def _http_response(req, streaming, deadline, read_timeout):
+    """Bound the entire urllib operation, including headers and body reads.
+
+    Socket timeouts alone reset with each read. urllib is not cancellable;
+    a daemon may finish draining later, but cannot publish a late answer.
+    """
+    done, result = threading.Event(), []
+
+    def read():
+        try:
+            try:
+                with urllib.request.urlopen(req, timeout=read_timeout) as resp:
+                    data = (_read_sse(resp, deadline) if streaming
+                            else json.loads(resp.read()))
+            except urllib.error.HTTPError as exc:
+                try:
+                    reason = exc.read(400).decode("utf-8", "replace").strip()
+                except Exception:  # noqa: BLE001
+                    reason = ""
+                finally:
+                    exc.close()
+                raise RuntimeError(f"{exc}: {reason}" if reason else str(exc))
+            result.append((True, data))
+        except Exception as exc:  # noqa: BLE001
+            result.append((False, exc))
+        finally:
+            done.set()
+
+    if time.monotonic() >= deadline:
+        raise RuntimeError("seat budget ran out")
+    threading.Thread(target=read, daemon=True).start()
+    if not done.wait(max(0, deadline - time.monotonic())):
+        raise RuntimeError("seat budget ran out")
+    ok, value = result[0]
+    if not ok:
+        raise value
+    return value
+
+
 def http_seat(specs, prompt, repo, timeout):
     """POST to each spec in turn until one yields text. Seats degrade, never
     raise: one unreachable provider must not take the panel down."""
     last = "no http spec"
     keys = []
+    deadline = time.monotonic() + timeout
     for spec in specs:
         if _STOPPING.is_set():
             return NOT_STARTED, "panel is stopping; seat not started"
@@ -640,31 +680,22 @@ def http_seat(specs, prompt, repo, timeout):
                          mapping)
         body = json.dumps(_subst(spec["body"], mapping)).encode()
         streaming = spec["body"].get("stream") is True
-        deadline = time.monotonic() + timeout
         data = None
         for attempt in range(1, (STREAM_ATTEMPTS if streaming else 1) + 1):
             if _STOPPING.is_set():
                 return NOT_STARTED, "panel is stopping; seat not started"
-            remaining = max(1, deadline - time.monotonic())
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                last = "seat budget ran out"
+                break
             try:
                 req = urllib.request.Request(_subst(spec["url"], mapping),
                                              data=body, headers=headers)
-                read_timeout = (min(STREAM_IDLE_TIMEOUT, remaining)
-                                if streaming else timeout)
-                with urllib.request.urlopen(req, timeout=read_timeout) as resp:
-                    data = (_read_sse(resp, deadline) if streaming
-                            else json.loads(resp.read()))
-                break
-            except urllib.error.HTTPError as exc:
-                # the status line alone hides "out of credit" behind a bare
-                # 401; the body says why. Never let the key ride along into a log.
-                try:
-                    reason = exc.read()[:400].decode("utf-8", "replace").strip()
-                except Exception:  # noqa: BLE001
-                    reason = ""
-                if key:
-                    reason = reason.replace(key, "[key]")
-                last = f"{exc}: {reason}" if reason else str(exc)
+                # Socket waits use whole seconds; the outer deadline retains
+                # exact subsecond precision across all retries/fallbacks.
+                read_timeout = min(timeout, math.ceil(remaining),
+                                   STREAM_IDLE_TIMEOUT if streaming else timeout)
+                data = _http_response(req, streaming, deadline, read_timeout)
                 break
             except Exception as exc:  # noqa: BLE001
                 last = str(exc)

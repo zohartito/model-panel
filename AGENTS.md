@@ -144,6 +144,9 @@ For CLI use `"cmd": {"argv": ["acme", "-p", "{prompt}"]}`.
   `[]` means first match in a list. Fallback answers are explicitly marked.
   `"stream": true` in a body reads SSE with a 180 s idle timeout and retries a
   stalled request (Model Studio sometimes accepts one and never answers).
+  All HTTP fallbacks/retries share one seat deadline, including body reads.
+  Uncancellable urllib I/O may drain in a daemon after timeout; late answers
+  are discarded and cannot write run artifacts.
 - `default` selects a seat; `local` requires opt-in; `serial` prevents shared
   RAM contention. Set lineage correctly or the consensus count is false.
 - **Effort policy (2026-10-28): xhigh wherever the route offers it, never max.**
