@@ -715,7 +715,10 @@ def http_seat(specs, prompt, repo, timeout):
                 # reasoning and leave the answer field empty: surface the
                 # fallback rather than nothing, but say that is what happened.
                 note = "" if i == 0 else f"[fell back to `{path}`]\n\n"
-                return 0, note + text
+                answer = note + text
+                for known_key in keys:
+                    answer = answer.replace(known_key, "[key]")
+                return 0, answer
         last = f"no text at any of {paths}"
     # Every error path, not only HTTPError: a stream error or exception text
     # that echoes the key must not ride into the seat file or _result.json.

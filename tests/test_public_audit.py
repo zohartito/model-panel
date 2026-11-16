@@ -1,6 +1,7 @@
 """Offline regressions for the 2026-11-15 public audit."""
 
 import json
+import io
 import os
 import subprocess
 import sys
@@ -233,3 +234,33 @@ class McpSeatPathTests(unittest.TestCase):
                                             "seat": "allowed", "max_chars": 3})
         self.assertEqual(result["text"], "ans")
         self.assertTrue(result["truncated"])
+
+
+class HttpCredentialTests(unittest.TestCase):
+    def test_pnl06_success_fallback_and_streaming_redact_credentials(self):
+        first, second = "synthetic-audit-key-A", "synthetic-audit-key-B"
+        for mode in ("success", "extract-fallback", "stream"):
+            with self.subTest(mode=mode):
+                answer = f"echo {first} and {second}"
+                if mode == "stream":
+                    payload = ("data: " + json.dumps({"choices": [{"delta": {
+                        "content": answer}}]}) + "\ndata: [DONE]\n").encode()
+                    paths = ["choices[0].message.content"]
+                else:
+                    payload = json.dumps({"text": answer}).encode()
+                    paths = ["text"] if mode == "success" else ["missing", "text"]
+                specs = [{"url": "http://example.invalid", "body": {},
+                          "key_from": {"env": first}, "extract": ["text"]},
+                         {"url": "http://example.invalid", "body": {
+                             "stream": mode == "stream"}, "key_from": {"env": second},
+                          "extract": paths}]
+                with patch.object(panel, "load_key", side_effect=lambda s: (s["env"], None)), \
+                        patch.object(panel.urllib.request, "urlopen", side_effect=[
+                            RuntimeError("first route unavailable"), io.BytesIO(payload)]):
+                    code, text = panel.http_seat(specs, "p", "/r", 5)
+                self.assertEqual(code, 0)
+                self.assertNotIn(first, text)
+                self.assertNotIn(second, text)
+                self.assertEqual(text.count("[key]"), 2)
+                if mode == "extract-fallback":
+                    self.assertIn("fell back", text)

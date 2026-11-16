@@ -150,6 +150,8 @@ For CLI use `"cmd": {"argv": ["acme", "-p", "{prompt}"]}`.
   All HTTP fallbacks/retries share one seat deadline, including body reads.
   Uncancellable urllib I/O may drain in a daemon after timeout; late answers
   are discarded and cannot write run artifacts.
+  Known HTTP keys are scrubbed from successful and failed answers, including
+  streaming and fallback results, before the caller can save them.
 - `default` selects a seat; `local` requires opt-in; `serial` prevents shared
   RAM contention. Set lineage correctly or the consensus count is false.
 - **Effort policy (2026-10-28): xhigh wherever the route offers it, never max.**
