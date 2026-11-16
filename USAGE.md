@@ -20,7 +20,7 @@ machine. Windows works the same way, from wherever you cloned the repo.
 | Surface | How you use it |
 |---|---|
 | **Terminal** (any shell) | `panel "question"` |
-| **Claude Code** | `/panel`, or just ask — the skill triggers itself |
+| **Claude Code** | ask it to use the panel MCP tools; `/panel` and the skill require the separate `claude plugin marketplace add zohartito/model-panel` and `claude plugin install panel@panel` commands |
 | **Codex CLI** | ask it to use the panel MCP tools |
 | **Cursor** (IDE + `cursor-agent`) | MCP tools available in chat |
 | **VS Code** | MCP tools in Copilot Chat agent mode |
