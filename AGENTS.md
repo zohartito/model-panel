@@ -88,6 +88,8 @@ rosters skip lanes that failed on quota/login in 24 h (`--include-dead`).
 Cmd seats get one Retry-After retry if the remaining budget allows it.
 Last outcomes: `$PANEL_RUNS/_seat-health.json`, surfaced in the roster.
 **Configured means CLI/key present, not successful live inference.**
+`panel_seats` and `--list-seats` share the wiring resolver; MCP rows include
+`configured`, `availability`, and a missing-configuration `reason`.
 
 `billing` is `subscription`, `metered`, `credit`, or `unknown` per seat.
 `--no-metered` excludes the latter three, including escalation and the merge

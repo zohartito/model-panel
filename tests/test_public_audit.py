@@ -309,3 +309,38 @@ class PythonMinimumTests(unittest.TestCase):
                 patch.object(inst.sys, "executable", "/new-python"), \
                 patch.object(inst.subprocess, "run", side_effect=probe):
             self.assertEqual(inst.python_exe(), "/new-python")
+
+
+class McpAvailabilityTests(unittest.TestCase):
+    def test_pnl12_reports_configuration_and_missing_reasons_like_cli(self):
+        registry = {
+            "missing-cli": {"cmd": {"argv": ["unavailable"]}},
+            "ready-cli": {"cmd": {"argv": ["present"]}},
+            "missing-env": {"cmd": {"argv": ["present"],
+                            "env_from": {"KEY": {"env": "missing"}}}},
+            "missing-http": {"http": {"key_from": {"env": "missing"}}},
+            "ready-http": {"http": {"key_from": {"env": "ready"}}},
+            "keyless-http": {"http": {}},
+            "unconfigured": {}}
+        def key(source):
+            if not source:
+                return None, None
+            return ("synthetic-value", None) if source["env"] == "ready" else (
+                None, "$missing is not set")
+        with patch.object(panel, "REGISTRY", registry), \
+                patch.object(panel, "seat_health", return_value={}), \
+                patch.object(panel, "track_record", return_value={}), \
+                patch.object(panel, "load_key", side_effect=key), \
+                patch.object(panel.shutil, "which", side_effect=lambda x: "/fake/present" if x == "present" else None):
+            rows = {r["seat"]: r for r in mcp_server.tool_panel_seats({})["seats"]}
+            output = io.StringIO()
+            with patch("sys.stdout", output):
+                panel.list_seats(registry)
+        for name in registry:
+            with self.subTest(name=name):
+                ready = name.startswith(("ready", "keyless"))
+                self.assertEqual(rows[name]["configured"], ready)
+                self.assertEqual(rows[name]["availability"], "configured" if ready else "missing")
+                if not ready:
+                    self.assertTrue(rows[name]["reason"])
+                    self.assertIn(rows[name]["reason"], output.getvalue())

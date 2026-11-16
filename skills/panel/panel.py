@@ -2403,6 +2403,24 @@ def grade(rundir, keypath, registry):
     return rows
 
 
+def seat_availability(entry):
+    """Resolve local wiring only; never infer successful live inference."""
+    if "cmd" in entry:
+        exe = entry["cmd"]["argv"][0]
+        if not shutil.which(exe):
+            return f"MISSING: {exe}"
+        for source in (entry["cmd"].get("env_from") or {}).values():
+            key, err = load_key(source)
+            if not key:
+                return err or "missing credentials"
+        return "configured"
+    if "http" in entry:
+        specs = entry["http"] if isinstance(entry["http"], list) else [entry["http"]]
+        key, err = load_key(specs[0].get("key_from"))
+        return "configured" if key or not specs[0].get("key_from") else err
+    return "unconfigured"
+
+
 def list_seats(registry):
     """Who is wired up on THIS machine, and whether the wiring resolves.
 
@@ -2415,18 +2433,7 @@ def list_seats(registry):
     rows = []
     for name, e in registry.items():
         kind = "cmd" if "cmd" in e else ("http" if "http" in e else "-")
-        if kind == "cmd":
-            exe = e["cmd"]["argv"][0]
-            reach = "configured" if shutil.which(exe) else f"MISSING: {exe}"
-            for source in (e["cmd"].get("env_from") or {}).values():
-                if reach == "configured" and not load_key(source)[0]:
-                    reach = load_key(source)[1]
-        elif kind == "http":
-            spec = e["http"] if isinstance(e["http"], list) else [e["http"]]
-            key, err = load_key(spec[0].get("key_from"))
-            reach = "configured" if (key or not spec[0].get("key_from")) else err
-        else:
-            reach = "unconfigured"
+        reach = seat_availability(e)
         last = health.get(name)
         if last and not last.get("ok"):
             err = " ".join(last.get("error", "").split())[:80]

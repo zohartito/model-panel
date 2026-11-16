@@ -433,8 +433,12 @@ def tool_panel_seats(_a):
     out = []
     for name, e in panel.REGISTRY.items():
         kind = "cmd" if "cmd" in e else ("http" if "http" in e else "-")
+        reach = panel.seat_availability(e)
         last = health.get(name)
         row = {"seat": name, "lineage": e.get("lineage"),
+               "configured": reach == "configured",
+               "availability": "configured" if reach == "configured" else "missing",
+               "reason": "" if reach == "configured" else reach,
                "default": bool(e.get("default")),
                "local": bool(e.get("local")),
                "grade": e.get("grade", "?"), "via": kind,
