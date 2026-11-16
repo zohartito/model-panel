@@ -15,6 +15,8 @@ python3 scripts/panel-install.py           # register installed surfaces
 Installer: backs up, merges, skips absent apps, adds `panel` to PATH.
 Existing launcher/config replacements are atomic with collision-safe backups;
 Codex and project MCP updates preserve fields other than command and args.
+CLI registration checks match the exact `panel` name and command/args; stale
+registrations are removed and re-added, while `--check` only reports them.
 MCP clients run `python3 <repo>/skills/panel/mcp_server.py`. Codex config:
 
 ```toml

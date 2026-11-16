@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import tempfile
 import tomllib
 import unittest
@@ -98,3 +99,39 @@ class InstallerMergeTests(unittest.TestCase):
                 inst.write_project_mcp(tmp, False)
                 original["mcpServers"]["panel"].update(inst.entry())
             self.assertEqual(json.loads(path.read_text()), original)
+
+
+class InstallerCliTests(unittest.TestCase):
+    def install(self, listing, dry=False):
+        inst = _load_script("panel-install")
+        self.calls = []
+        def run(argv, **kwargs):
+            self.calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, listing, "")
+        with patch.object(inst.shutil, "which", return_value="/fake/claude"), \
+                patch.object(inst.subprocess, "run", side_effect=run), \
+                patch.object(inst, "python_exe", return_value="python3"):
+            return inst.install_cli("claude-code", "claude", ["claude", "mcp", "list"],
+                ["claude", "mcp", "add", "panel", "--", "python3", str(inst.SERVER)],
+                set(), dry)
+
+    def test_pnl05_relocated_cli_registration_is_replaced(self):
+        self.assertEqual(self.install("panel: python3 /old/server.py - Connected")[0],
+                         "updated")
+        self.assertEqual([c[2] for c in self.calls], ["list", "remove", "add"])
+
+    def test_pnln1_similar_name_and_path_do_not_count_as_panel(self):
+        self.assertEqual(self.install(
+            "grafana-panels: python3 /tools/panel/server.py - Connected")[0], "added")
+        self.assertEqual([c[2] for c in self.calls], ["list", "add"])
+
+    def test_pnl05_check_reports_stale_without_mutating(self):
+        self.assertEqual(self.install("panel: python3 /old/server.py", dry=True)[0],
+                         "update")
+        self.assertEqual([c[2] for c in self.calls], ["list"])
+
+    def test_pnl05_matching_command_and_args_are_idempotent(self):
+        inst = _load_script("panel-install")
+        self.assertEqual(self.install(f'panel: python3 "{inst.SERVER}" - Connected')[0],
+                         "ok")
+        self.assertEqual([c[2] for c in self.calls], ["list"])

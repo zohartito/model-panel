@@ -24,6 +24,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -230,29 +231,45 @@ def install_codex(backups, dry):
     return ("updated" if existing else "added"), str(SERVER)
 
 
-def cli_registered(cmd, probe):
+def cli_registered(cmd, probe, wanted):
     if not shutil.which(cmd):
         return None
+    result = subprocess.run(probe, capture_output=True, text=True, timeout=30)
+    if result.returncode:
+        raise ValueError("could not inspect MCP registrations")
+    # Match the server NAME, never a substring of another name or path.
+    out = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    match = re.search(r"^\s*panel:\s*(.*?)\s*$", out, re.M)
+    if not match:
+        return "missing"
+    command = match.group(1).split(" - ", 1)[0].strip()
     try:
-        out = subprocess.run(probe, capture_output=True, text=True,
-                             timeout=30).stdout
-    except Exception:  # noqa: BLE001
-        return None
-    return "panel" in out
+        actual = shlex.split(command)
+    except ValueError:
+        actual = []
+    return "ok" if actual == wanted or command == " ".join(wanted) else "stale"
 
 
 def install_cli(name, cmd, probe, add, backups, dry):
     del backups
-    state = cli_registered(cmd, probe)
+    try:
+        state = cli_registered(cmd, probe, add[add.index("--") + 1:])
+    except Exception as exc:  # noqa: BLE001
+        return f"failed: {exc}", None
     if state is None:
         return "absent", None
-    if state:
+    if state == "ok":
         return "ok", str(SERVER)
     if dry:
-        return "add", str(SERVER)
+        return ("update" if state == "stale" else "add"), str(SERVER)
     try:
+        if state == "stale":
+            removed = subprocess.run([cmd, "mcp", "remove", "panel"],
+                                     capture_output=True, text=True, timeout=60)
+            if removed.returncode:
+                return "failed: could not remove stale panel registration", None
         r = subprocess.run(add, capture_output=True, text=True, timeout=60)
-        return ("added" if r.returncode == 0
+        return (("updated" if state == "stale" else "added") if r.returncode == 0
                 else f"failed: {(r.stderr or r.stdout).strip()[:60]}"), \
             str(SERVER)
     except Exception as exc:  # noqa: BLE001
