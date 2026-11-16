@@ -150,11 +150,17 @@ A run lands in `~/panel-runs/<repo>/<timestamp>/`:
 _summary.md    consensus table + bottom lines   <- read this first
 _result.json   the same, machine-readable
 <seat>.md      one per model, written the moment it lands
-prompt.md      exactly what was sent
+prompt.md      initial prompt: all task seats; all diff seats except codex
+prompt.codex.md initial prompt for codex in diff mode (file-reference variant)
+reviewed.diff  saved diff, referenced by prompt.codex.md
 run.json       what was planned, the models that ran (used by resume)
 _merge.json    the merge judge's proposals, keyed to the rows it saw
 _verdicts.json what you confirmed or rejected after checking
 ```
+
+Only the seat literally named `codex` uses the variant; `codex-astra` and
+`codex-luna` receive `prompt.md`. Findings-block repair, when needed, is a
+separate follow-up request, not the saved initial prompt.
 
 Each consensus row has an id (`#3fa2c91b`). `4 (+2 likely)` means four
 lineages raised the claim and the merge judge thinks two more raised the same

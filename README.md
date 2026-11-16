@@ -21,7 +21,8 @@ check before you act.
 ## How it works
 
 1. You run `panel.py --task "question"` (or `--diff change.diff`).
-2. panel builds one prompt and sends it to every selected seat. A seat is
+2. panel builds a shared prompt; in diff mode, the seat named `codex` receives
+   a file-reference variant instead of the embedded diff (see artifacts below). A seat is
    either a **CLI** it runs as a subprocess (`claude`, `codex`, `gemini`, ...)
    or an **HTTP** endpoint it POSTs to (any OpenAI-style chat API, Ollama, ...).
 3. Each seat ends its answer with a short machine-readable findings block.
@@ -105,9 +106,15 @@ Each run gets its own directory, by default `~/panel-runs/<repo>/<timestamp>/`
 | `_summary.md` | Consensus table (finding id, lineage count, severity, claim, seats) and each seat's bottom line. Read this first. |
 | `_result.json` | The same, machine-readable. `--json` also prints it. |
 | `<seat>.md` | One seat's full answer, written as soon as it lands. |
-| `prompt.md` | Exactly what was sent. |
+| `prompt.md` | The initial prompt for every task-mode seat and every diff-mode seat except `codex`. |
+| `prompt.codex.md` | In diff mode, the initial prompt for the seat literally named `codex`; it refers to `reviewed.diff` instead of embedding the diff. |
+| `reviewed.diff` | Copy of the diff being reviewed, saved in diff mode. |
 | `run.json` | What was planned and which model each seat ran (used by `--resume`). |
 | `_verdicts.json` | Findings you marked confirmed or rejected. |
+
+The `codex-astra` and `codex-luna` seats use `prompt.md`, like other seats.
+These files record initial prompts; optional findings-block repair is a
+separate follow-up request.
 
 Shared state lives in the run root: `_track-record.jsonl` (every verdict, per
 seat and model) and `_seat-health.json` (each seat's last outcome).
