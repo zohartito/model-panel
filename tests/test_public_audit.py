@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import tomllib
@@ -174,3 +175,24 @@ class HttpBudgetTests(unittest.TestCase):
         self.assertEqual(code, -3)
         self.assertIn("budget", text)
         self.assertLess(elapsed, 0.25)
+
+
+class McpGradeTests(unittest.TestCase):
+    def test_pnl08_invalid_grade_returns_error_and_stdio_ping_survives(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            key = Path(tmp) / "key.json"
+            key.write_text('{"defects": []}')
+            messages = [
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+                    "name": "panel_grade", "arguments": {"run_dir": tmp, "key": str(key)}}},
+                {"jsonrpc": "2.0", "id": 3, "method": "ping"}]
+            server = Path(panel.__file__).with_name("mcp_server.py")
+            result = subprocess.run([sys.executable, str(server)],
+                input="".join(json.dumps(m) + "\n" for m in messages),
+                text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            replies = [json.loads(line) for line in result.stdout.splitlines()]
+            self.assertEqual([r["id"] for r in replies], [1, 2, 3])
+            self.assertTrue(replies[1]["result"]["isError"])
+            self.assertEqual(replies[2]["result"], {})

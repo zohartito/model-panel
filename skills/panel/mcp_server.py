@@ -404,7 +404,11 @@ def tool_panel_resume(a):
 
 
 def tool_panel_grade(a):
-    rows = panel.grade(a["run_dir"], a["key"], panel.REGISTRY)
+    try:
+        rows = panel.grade(a["run_dir"], a["key"], panel.REGISTRY)
+    except SystemExit as exc:
+        # CLI validation must become a tool error, not terminate stdio MCP.
+        raise ValueError(str(exc)) from None
     return {"run_dir": a["run_dir"],
             "report": str(Path(a["run_dir"]) / "_grade.md"),
             "scores": [{"seat": r[0], "found": r[1], "of": r[2],
