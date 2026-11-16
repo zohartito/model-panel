@@ -58,16 +58,19 @@ def python_exe():
     and silently kills every registration -- so a plain `python3` on PATH
     wins when it works, and sys.executable is only the fallback.
     """
+    candidates = []
     for cand in (shutil.which("python3"), sys.executable):
         if not cand:
             continue
+        shim = Path.home() / ".pyenv" / "shims" / "python3"
+        if "/.pyenv/" in cand and shim.exists():
+            candidates.append(str(shim))  # prefer stability only if verified
+        candidates.append(cand)
+    for cand in dict.fromkeys(candidates):
         try:
             r = subprocess.run([cand, "-c", "import sys;print(sys.version_info >= (3, 11))"],
                                capture_output=True, text=True, timeout=15)
             if r.returncode == 0 and r.stdout.strip() == "True":
-                shim = Path.home() / ".pyenv" / "shims" / "python3"
-                if "/.pyenv/" in cand and shim.exists():
-                    return str(shim)  # versions/3.x.y/... dies on upgrade
                 return str(Path(cand).resolve()) if Path(cand).is_symlink() \
                     and "/opt/homebrew/bin/" not in cand else cand
         except Exception:  # noqa: BLE001

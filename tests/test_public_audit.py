@@ -332,6 +332,52 @@ class PythonMinimumTests(unittest.TestCase):
                 patch.object(inst.subprocess, "run", side_effect=probe):
             self.assertEqual(inst.python_exe(), "/new-python")
 
+    def test_pnl09_installer_does_not_reselect_rejected_pyenv_shim(self):
+        inst = _load_script("panel-install")
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            shim = home / ".pyenv/shims/python3"
+            shim.parent.mkdir(parents=True)
+            shim.touch()
+            versioned = str(home / ".pyenv/versions/3.11.7/bin/python3")
+            for rejection in ("old", "failed", "timeout"):
+                with self.subTest(rejection=rejection):
+                    calls = []
+                    def probe(argv, **kwargs):
+                        calls.append(argv[0])
+                        if argv[0] == str(shim):
+                            if rejection == "timeout":
+                                raise subprocess.TimeoutExpired(argv, 15)
+                            return subprocess.CompletedProcess(
+                                argv, int(rejection == "failed"), "False\n", "")
+                        self.assertEqual(argv[0], versioned)
+                        return subprocess.CompletedProcess(argv, 0, "True\n", "")
+                    with patch.object(Path, "home", return_value=home), \
+                            patch.object(inst.shutil, "which", return_value=str(shim)), \
+                            patch.object(inst.sys, "executable", versioned), \
+                            patch.object(inst.subprocess, "run", side_effect=probe):
+                        self.assertEqual(inst.entry()["command"], versioned)
+                    self.assertEqual(calls, [str(shim), versioned])
+
+    def test_pnl09_compatible_pyenv_shim_is_verified_before_selection(self):
+        inst = _load_script("panel-install")
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            shim = home / ".pyenv/shims/python3"
+            shim.parent.mkdir(parents=True)
+            shim.touch()
+            versioned = str(home / ".pyenv/versions/3.11.7/bin/python3")
+            for on_path in (None, versioned):
+                with self.subTest(on_path=on_path):
+                    def probe(argv, **kwargs):
+                        return subprocess.CompletedProcess(argv, 0, "True\n", "")
+                    with patch.object(Path, "home", return_value=home), \
+                            patch.object(inst.shutil, "which", return_value=on_path), \
+                            patch.object(inst.sys, "executable", versioned), \
+                            patch.object(inst.subprocess, "run", side_effect=probe) as run:
+                        self.assertEqual(inst.entry()["command"], str(shim))
+                    self.assertIn(str(shim), [call.args[0][0] for call in run.call_args_list])
+
 
 class McpAvailabilityTests(unittest.TestCase):
     def test_pnl12_reports_configuration_and_missing_reasons_like_cli(self):
