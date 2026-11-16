@@ -18,6 +18,25 @@ import mcp_server
 
 
 class InstallerBackupTests(unittest.TestCase):
+    def test_pnl01_atomic_replacement_closes_temp_before_replace(self):
+        inst = _load_script("panel-install")
+        original_temp, original_replace = tempfile.NamedTemporaryFile, os.replace
+        opened = []
+        def temporary(**kwargs):
+            handle = original_temp(**kwargs)
+            opened.append(handle)
+            return handle
+        def replace(source, target):
+            self.assertTrue(opened[-1].closed, "Windows cannot replace an open temp file")
+            original_replace(source, target)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text("old")
+            with patch.object(inst.tempfile, "NamedTemporaryFile", side_effect=temporary), \
+                    patch.object(inst.os, "replace", side_effect=replace):
+                inst.write_atomic(path, "new")
+            self.assertEqual(path.read_text(), "new")
+
     def test_pnl01_valid_project_is_backed_up(self):
         inst = _load_script("panel-install")
         with tempfile.TemporaryDirectory() as tmp:

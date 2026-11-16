@@ -130,14 +130,14 @@ def write_atomic(path, text):
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
                                      dir=path.parent, delete=False) as out:
         tmp = Path(out.name)
-        try:
+    try:
+        with tmp.open("w", encoding="utf-8") as out:
             out.write(text)
-            out.flush()
-            if path.exists():
-                shutil.copymode(path, tmp)
-            os.replace(tmp, path)
-        finally:
-            tmp.unlink(missing_ok=True)
+        if path.exists():
+            shutil.copymode(path, tmp)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def read_json(path):
