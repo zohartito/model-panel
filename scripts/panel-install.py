@@ -9,7 +9,8 @@ One command per machine, idempotent:
 
 It registers the MCP server in every config it finds (Claude Code, Codex,
 Cursor, VS Code, Windsurf, Zed, Gemini CLI, Qwen CLI, grok CLI, OpenCode,
-Claude Desktop) and puts a `panel` launcher on PATH for plain terminals.
+Claude Desktop) and creates a `panel` launcher under ~/.local/bin, which the
+user must add to PATH if needed.
 
 Rules it follows so it is safe to re-run:
   * every file is backed up once per run before it is touched
@@ -24,10 +25,17 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+if sys.version_info < (3, 11):
+    raise SystemExit("panel requires Python 3.11 or newer")
+
+import tempfile
 import time
+import tomllib
+import uuid
 from pathlib import Path
 
 HOME = Path(__file__).resolve().parent.parent
@@ -50,21 +58,24 @@ def python_exe():
     and silently kills every registration -- so a plain `python3` on PATH
     wins when it works, and sys.executable is only the fallback.
     """
+    candidates = []
     for cand in (shutil.which("python3"), sys.executable):
         if not cand:
             continue
+        shim = Path.home() / ".pyenv" / "shims" / "python3"
+        if "/.pyenv/" in cand and shim.exists():
+            candidates.append(str(shim))  # prefer stability only if verified
+        candidates.append(cand)
+    for cand in dict.fromkeys(candidates):
         try:
-            r = subprocess.run([cand, "-c", "import sys;print(sys.version_info[0])"],
+            r = subprocess.run([cand, "-c", "import sys;print(sys.version_info >= (3, 11))"],
                                capture_output=True, text=True, timeout=15)
-            if r.returncode == 0 and r.stdout.strip() == "3":
-                shim = Path.home() / ".pyenv" / "shims" / "python3"
-                if "/.pyenv/" in cand and shim.exists():
-                    return str(shim)  # versions/3.x.y/... dies on upgrade
+            if r.returncode == 0 and r.stdout.strip() == "True":
                 return str(Path(cand).resolve()) if Path(cand).is_symlink() \
                     and "/opt/homebrew/bin/" not in cand else cand
         except Exception:  # noqa: BLE001
             continue
-    return "python3"
+    raise SystemExit("panel requires a working Python 3.11 or newer interpreter")
 
 
 def app_support():
@@ -100,11 +111,37 @@ def entry():
 
 
 def backup(path, done):
-    if path in done or not path.exists():
-        done.add(path)
+    if path in done or not (path.exists() or path.is_symlink()):
         return
-    shutil.copy2(path, path.with_suffix(path.suffix + f".bak-{STAMP}"))
+    suffix = 0
+    while True:
+        dest = path.with_name(path.name + f".bak-{STAMP}" +
+                              (f"-{suffix}" if suffix else ""))
+        try:
+            if path.is_symlink():
+                dest.symlink_to(os.readlink(path))
+            else:
+                with dest.open("xb") as out, path.open("rb") as source:
+                    shutil.copyfileobj(source, out)
+                shutil.copystat(path, dest)
+            break
+        except FileExistsError:
+            suffix += 1
     done.add(path)
+
+
+def write_atomic(path, text):
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                     dir=path.parent, delete=False) as out:
+        tmp = Path(out.name)
+    try:
+        with tmp.open("w", encoding="utf-8") as out:
+            out.write(text)
+        if path.exists():
+            shutil.copymode(path, tmp)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def read_json(path):
@@ -141,7 +178,7 @@ def install_json(path, key, backups, dry):
         return ("update" if have else "add"), str(SERVER)
     backup(path, backups)
     data.setdefault(key, {})["panel"] = merged
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    write_atomic(path, json.dumps(data, indent=2) + "\n")
     return ("updated" if have else "added"), str(SERVER)
 
 
@@ -171,6 +208,23 @@ def install_codex(backups, dry):
     text = CODEX.read_text()
     existing = re.search(r"^\[mcp_servers\.panel\]\s*$(.*?)(?=^\[|\Z)",
                          text, re.S | re.M)
+    if existing:
+        # Parse complete TOML assignments, including multiline arrays/strings,
+        # and replace only command/args. Keep editor fields and nested tables.
+        lines = existing.group(1).splitlines(keepends=True)
+        kept, statement = [], ""
+        for line in lines:
+            statement += line
+            try:
+                fields = tomllib.loads(statement)
+            except tomllib.TOMLDecodeError:
+                continue
+            if not fields.keys() & {"command", "args"}:
+                kept.append(statement)
+            statement = ""
+        if statement:
+            return "unreadable", None
+        block += "".join(kept).lstrip("\n")
     if existing and existing.group(0).strip() == block.strip():
         return "ok", str(SERVER)
     if dry:
@@ -180,67 +234,95 @@ def install_codex(backups, dry):
         text = text[:existing.start()] + block + text[existing.end():]
     else:
         text = text.rstrip() + "\n\n" + block
-    CODEX.write_text(text)
+    write_atomic(CODEX, text)
     return ("updated" if existing else "added"), str(SERVER)
 
 
-def cli_registered(cmd, probe):
+def cli_registered(cmd, probe, wanted):
     if not shutil.which(cmd):
         return None
+    result = subprocess.run(probe, capture_output=True, text=True, timeout=30)
+    if result.returncode:
+        raise ValueError("could not inspect MCP registrations")
+    # Match the server NAME, never a substring of another name or path.
+    out = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    match = re.search(r"^\s*panel:\s*(.*?)\s*$", out, re.M)
+    if not match:
+        return "missing"
+    command = match.group(1)
     try:
-        out = subprocess.run(probe, capture_output=True, text=True,
-                             timeout=30).stdout
-    except Exception:  # noqa: BLE001
-        return None
-    return "panel" in out
+        tokens = shlex.shlex(command, posix=True)
+        tokens.whitespace_split = True
+        tokens.commenters = ""
+        actual = []
+        for token in tokens:
+            if token == "-":  # status suffix, never part of a quoted path
+                break
+            actual.append(token)
+    except ValueError:
+        actual = []
+    raw = " ".join(wanted)
+    return "ok" if actual == wanted or command == raw \
+        or command.startswith(raw + " - ") else "stale"
 
 
 def install_cli(name, cmd, probe, add, backups, dry):
     del backups
-    state = cli_registered(cmd, probe)
+    try:
+        state = cli_registered(cmd, probe, add[add.index("--") + 1:])
+    except Exception as exc:  # noqa: BLE001
+        return f"failed: {exc}", None
     if state is None:
         return "absent", None
-    if state:
+    if state == "ok":
         return "ok", str(SERVER)
     if dry:
-        return "add", str(SERVER)
+        return ("update" if state == "stale" else "add"), str(SERVER)
     try:
+        if state == "stale":
+            removed = subprocess.run([cmd, "mcp", "remove", "panel"],
+                                     capture_output=True, text=True, timeout=60)
+            if removed.returncode:
+                return "failed: could not remove stale panel registration", None
         r = subprocess.run(add, capture_output=True, text=True, timeout=60)
-        return ("added" if r.returncode == 0
+        return (("updated" if state == "stale" else "added") if r.returncode == 0
                 else f"failed: {(r.stderr or r.stdout).strip()[:60]}"), \
             str(SERVER)
     except Exception as exc:  # noqa: BLE001
         return f"failed: {exc}", None
 
 
-def install_launcher(dry):
+def install_launcher(dry, backups=None):
     """`panel` on PATH, so a plain terminal is a first-class surface."""
     bindir = Path.home() / (".local/bin" if not WINDOWS else ".local\\bin")
     target = bindir / ("panel.cmd" if WINDOWS else "panel")
     if not dry:
         bindir.mkdir(parents=True, exist_ok=True)
+        backup(target, backups if backups is not None else set())
         if WINDOWS:
-            target.write_text(f'@echo off\r\n"{python_exe()}" "{LAUNCHER}" %*\r\n')
+            write_atomic(target, f'@echo off\r\n"{python_exe()}" "{LAUNCHER}" %*\r\n')
         else:
-            if target.exists() or target.is_symlink():
-                target.unlink()
-            target.symlink_to(LAUNCHER)
-            LAUNCHER.chmod(0o755)
+            tmp = bindir / f".panel-{uuid.uuid4().hex}"
+            try:
+                tmp.symlink_to(LAUNCHER)
+                os.replace(tmp, target)
+            finally:
+                tmp.unlink(missing_ok=True)
     on_path = str(bindir) in os.environ.get("PATH", "").split(os.pathsep)
     return ("ok" if target.exists() else "added"), str(target), on_path
 
 
-def write_project_mcp(project, dry):
+def write_project_mcp(project, dry, backups=None):
     path = Path(project).expanduser().resolve() / ".mcp.json"
     data = read_json(path) if path.exists() else {}
     if not isinstance(data, dict):
         # unparseable: keep the user's text instead of silently replacing it
-        if not dry:
-            backup(path, set())
         data = {}
-    data.setdefault("mcpServers", {})["panel"] = entry()
+    servers = data.setdefault("mcpServers", {})
+    servers["panel"] = {**(servers.get("panel") or {}), **entry()}
     if not dry:
-        path.write_text(json.dumps(data, indent=2) + "\n")
+        backup(path, backups if backups is not None else set())
+        write_atomic(path, json.dumps(data, indent=2) + "\n")
     return path
 
 
@@ -282,7 +364,7 @@ def main():
         state, _ = install_cli(name, cmd, probe, add, backups, dry)
         rows.append((name, state, None, cmd))
 
-    lstate, lpath, on_path = install_launcher(dry)
+    lstate, lpath, on_path = install_launcher(dry, backups)
     rows.append(("terminal (panel)", lstate, None, lpath))
 
     width = max(len(r[0]) for r in rows)
@@ -297,7 +379,7 @@ def main():
               f"{'' if state != 'absent' else f'  {DIM}{where}{RESET}'}")
 
     if args.project:
-        path = write_project_mcp(args.project, dry)
+        path = write_project_mcp(args.project, dry, backups)
         print(f"\n  project config {'would be ' if dry else ''}written: {path}")
 
     if not on_path:
