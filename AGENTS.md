@@ -65,6 +65,8 @@ MCP: `panel_run`, `panel_status`, `panel_summary`, `panel_seat`, `panel_resume`,
 findings. Read seats only when the summary points to them. `panel_verdict`
 records a reproduced finding: each seat's measured track record, per model.
 Invalid grading input returns an MCP tool error and leaves the server running.
+`panel_seat` requires a safe name in the run.json roster and rejects symlink
+answers/manifests and paths outside the run directory.
 
 Answers save as they land. Refill failed/missing seats without repaying successes:
 `python3 "$PANEL" --resume last --repo /path/to/repo`.

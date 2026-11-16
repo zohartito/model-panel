@@ -379,7 +379,19 @@ def tool_panel_summary(a):
 
 
 def tool_panel_seat(a):
-    path = Path(a["run_dir"]) / f"{a['seat']}.md"
+    run = Path(a["run_dir"])
+    name = a["seat"]
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
+        raise ValueError("invalid seat name")
+    manifest = run / panel.RUN_META
+    if run.is_symlink() or manifest.is_symlink() or not manifest.is_file():
+        raise ValueError("run_dir must contain a regular run.json")
+    meta = json.loads(manifest.read_text())
+    if name not in meta.get("planned", []):
+        raise ValueError("seat is not in this run's roster")
+    path = run / f"{name}.md"
+    if path.is_symlink() or path.resolve().parent != run.resolve():
+        raise ValueError("seat file must stay inside the run without symlinks")
     if not path.exists():
         raise ValueError(f"no seat file {path}")
     limit = int(a.get("max_chars") or 20000)

@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from test_audit_fixes import _load_script
 import panel
+import mcp_server
 
 
 class InstallerBackupTests(unittest.TestCase):
@@ -196,3 +197,39 @@ class McpGradeTests(unittest.TestCase):
             self.assertEqual([r["id"] for r in replies], [1, 2, 3])
             self.assertTrue(replies[1]["result"]["isError"])
             self.assertEqual(replies[2]["result"], {})
+
+
+class McpSeatPathTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.run = self.root / "run"
+        self.run.mkdir()
+        (self.run / "run.json").write_text(json.dumps({"planned": ["allowed"]}))
+        (self.run / "allowed.md").write_text("answer")
+        (self.root / "outside.md").write_text("synthetic outside file")
+
+    def test_pnl04_traversal_and_unplanned_names_are_rejected(self):
+        (self.run / "unplanned.md").write_text("not a seat")
+        for name in ("../outside", "unplanned"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                mcp_server.tool_panel_seat({"run_dir": str(self.run), "seat": name})
+
+    def test_pnl04_symlink_answer_and_manifest_are_rejected(self):
+        (self.run / "allowed.md").unlink()
+        (self.run / "allowed.md").symlink_to(self.root / "outside.md")
+        with self.assertRaises(ValueError):
+            mcp_server.tool_panel_seat({"run_dir": str(self.run), "seat": "allowed"})
+        (self.run / "allowed.md").unlink()
+        (self.run / "allowed.md").write_text("answer")
+        (self.run / "run.json").rename(self.root / "manifest.json")
+        (self.run / "run.json").symlink_to(self.root / "manifest.json")
+        with self.assertRaises(ValueError):
+            mcp_server.tool_panel_seat({"run_dir": str(self.run), "seat": "allowed"})
+
+    def test_pnl04_planned_regular_answer_is_still_readable(self):
+        result = mcp_server.tool_panel_seat({"run_dir": str(self.run),
+                                            "seat": "allowed", "max_chars": 3})
+        self.assertEqual(result["text"], "ans")
+        self.assertTrue(result["truncated"])
