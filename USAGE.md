@@ -208,8 +208,11 @@ because it reasons differently, and a finding with a repro beats any score.
 
 ## Quick answers and escalation
 
-`--preset quick` asks six lineages whose seats answer fastest (medians of
-1.5–5.5 minutes over 91 runs; no Claude seat, each has an 11+ minute median).
+`--preset quick` starts with six lineages and no Claude seat. It is intended
+as a responsive starting tier, but the current roster is not fully benchmarked:
+Carbon's speed on real panel prompts is still unmeasured. Historical medians
+from an earlier roster do not establish the current roster's speed; use
+`--estimate --preset quick` to inspect the timing history available locally.
 `--escalate` starts there and seats the rest of the default roster only when
 the quick tier leaves doubt: fewer than four lineages voted, a high-severity
 claim came from one lineage alone, or a diff review split between CLEAN and

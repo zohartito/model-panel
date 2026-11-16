@@ -53,7 +53,7 @@ python3 "$PANEL" --verdict <run> --finding <id> --mark confirmed|rejected
 - **trio**: claude-fable + codex + gemini-carbon.
 - **strong**: Fable + Astra + Gemini 4 Carbon + Grok + Kimi Pro + Muse CLI
   + free GLM/DeepSeek Flash. Eight lineages; ungraded.
-- **quick**: fastest measured seat of six lineages (no Claude). `--escalate`
+- **quick**: six-lineage starting tier (no Claude; current timings are not fully measured). `--escalate`
   starts here; the rest seat only on a 1-lineage high, <4 lineages, or split verdict.
 - **free**: Flash, Copilot Auto, free Nemotron/MiMo/GLM/DeepSeek and `local-27b`
   (Ollama on this machine).
