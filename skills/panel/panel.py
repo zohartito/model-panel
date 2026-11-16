@@ -73,6 +73,9 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+if sys.version_info < (3, 11):
+    raise SystemExit("panel requires Python 3.11 or newer")
+
 try:
     import fcntl  # POSIX file locks
 except ImportError:  # Windows

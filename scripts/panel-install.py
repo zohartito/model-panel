@@ -28,6 +28,9 @@ import shlex
 import shutil
 import subprocess
 import sys
+if sys.version_info < (3, 11):
+    raise SystemExit("panel requires Python 3.11 or newer")
+
 import tempfile
 import time
 import tomllib
@@ -58,9 +61,9 @@ def python_exe():
         if not cand:
             continue
         try:
-            r = subprocess.run([cand, "-c", "import sys;print(sys.version_info[0])"],
+            r = subprocess.run([cand, "-c", "import sys;print(sys.version_info >= (3, 11))"],
                                capture_output=True, text=True, timeout=15)
-            if r.returncode == 0 and r.stdout.strip() == "3":
+            if r.returncode == 0 and r.stdout.strip() == "True":
                 shim = Path.home() / ".pyenv" / "shims" / "python3"
                 if "/.pyenv/" in cand and shim.exists():
                     return str(shim)  # versions/3.x.y/... dies on upgrade
@@ -68,7 +71,7 @@ def python_exe():
                     and "/opt/homebrew/bin/" not in cand else cand
         except Exception:  # noqa: BLE001
             continue
-    return "python3"
+    raise SystemExit("panel requires a working Python 3.11 or newer interpreter")
 
 
 def app_support():

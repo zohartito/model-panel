@@ -7,6 +7,8 @@ via MCP. Wiring lives in `skills/panel/seats.json`. Each run writes
 
 ## Install everywhere
 
+Python 3.11+ is required; the installer only registers a compatible interpreter.
+
 ```bash
 python3 scripts/panel-install.py --check   # report only
 python3 scripts/panel-install.py           # register installed surfaces

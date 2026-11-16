@@ -39,6 +39,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+if sys.version_info < (3, 11):
+    raise SystemExit("panel requires Python 3.11 or newer")
+
 SCHEMA = "panel.on-tag.v1"
 GRADE_SCHEMA = "panel.on-tag.grade.v1"
 REPO = Path(__file__).resolve().parent.parent          # the panel repo

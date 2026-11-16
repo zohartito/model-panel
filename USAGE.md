@@ -4,6 +4,8 @@ One question → every wired frontier model in parallel → you synthesize.
 
 ## Install (or repair) every surface
 
+Use Python 3.11 or newer for the CLI, MCP server, installer, and offline tests.
+
 ```bash
 python3 <repo>/scripts/panel-install.py --check   # report only
 python3 <repo>/scripts/panel-install.py           # do it

@@ -264,3 +264,29 @@ class HttpCredentialTests(unittest.TestCase):
                 self.assertEqual(text.count("[key]"), 2)
                 if mode == "extract-fallback":
                     self.assertIn("fell back", text)
+
+
+class PythonMinimumTests(unittest.TestCase):
+    def test_pnl09_entrypoints_reject_unsupported_python_clearly(self):
+        root = Path(panel.__file__).resolve().parents[2]
+        paths = ["skills/panel/panel.py", "skills/panel/mcp_server.py",
+                 "skills/panel/build.py", "scripts/seat-refresh.py",
+                 "scripts/panel-install.py", "scripts/panel-on-tag.py", "bin/panel"]
+        for path in paths:
+            with self.subTest(path=path):
+                script = ("import sys, runpy; sys.version_info = (3, 9, 6); "
+                          f"runpy.run_path({str(root / path)!r}, run_name='version_probe')")
+                result = subprocess.run([sys.executable, "-c", script],
+                                        text=True, capture_output=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Python 3.11", result.stderr)
+
+    def test_pnl09_installer_does_not_select_python39_on_path(self):
+        inst = _load_script("panel-install")
+        def probe(argv, **kwargs):
+            output = "3" if "version_info[0]" in argv[-1] else str(argv[0] == "/new-python")
+            return subprocess.CompletedProcess(argv, 0, output, "")
+        with patch.object(inst.shutil, "which", return_value="/old-python"), \
+                patch.object(inst.sys, "executable", "/new-python"), \
+                patch.object(inst.subprocess, "run", side_effect=probe):
+            self.assertEqual(inst.python_exe(), "/new-python")

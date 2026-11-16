@@ -12,7 +12,7 @@ confirmed or rejected, and each seat builds a measured track record.
 panel does not decide anything for you. Its output is evidence you read and
 check before you act.
 
-- Plain Python 3 standard library. No `pip install`.
+- Plain Python 3.11+ standard library. No `pip install`.
 - Works as a command-line tool, an MCP server (for Claude Code, Codex, Cursor,
   VS Code and other MCP clients), and a Claude Code plugin.
 - Seats are configuration (`skills/panel/seats.json`), not code. Adding a
@@ -30,7 +30,7 @@ check before you act.
 
 ## Requirements
 
-- Python 3 (CI runs 3.12 and 3.13; this copy was also tested on 3.11).
+- Python 3.11 or newer (CI covers 3.11, 3.12 and 3.13).
 - macOS or Linux. Windows code paths exist but are only exercised in
   simulated tests so far (see `.panel/residuals.md`).
 - At least one model you can reach: a model CLI you are already signed in to,
