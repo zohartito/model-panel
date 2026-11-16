@@ -246,12 +246,21 @@ def cli_registered(cmd, probe, wanted):
     match = re.search(r"^\s*panel:\s*(.*?)\s*$", out, re.M)
     if not match:
         return "missing"
-    command = match.group(1).split(" - ", 1)[0].strip()
+    command = match.group(1)
     try:
-        actual = shlex.split(command)
+        tokens = shlex.shlex(command, posix=True)
+        tokens.whitespace_split = True
+        tokens.commenters = ""
+        actual = []
+        for token in tokens:
+            if token == "-":  # status suffix, never part of a quoted path
+                break
+            actual.append(token)
     except ValueError:
         actual = []
-    return "ok" if actual == wanted or command == " ".join(wanted) else "stale"
+    raw = " ".join(wanted)
+    return "ok" if actual == wanted or command == raw \
+        or command.startswith(raw + " - ") else "stale"
 
 
 def install_cli(name, cmd, probe, add, backups, dry):

@@ -126,7 +126,7 @@ class InstallerMergeTests(unittest.TestCase):
 
 
 class InstallerCliTests(unittest.TestCase):
-    def install(self, listing, dry=False):
+    def install(self, listing, dry=False, python="python3", server=None):
         inst = _load_script("panel-install")
         self.calls = []
         def run(argv, **kwargs):
@@ -134,9 +134,10 @@ class InstallerCliTests(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, listing, "")
         with patch.object(inst.shutil, "which", return_value="/fake/claude"), \
                 patch.object(inst.subprocess, "run", side_effect=run), \
-                patch.object(inst, "python_exe", return_value="python3"):
+                patch.object(inst, "python_exe", return_value=python), \
+                patch.object(inst, "SERVER", server or inst.SERVER):
             return inst.install_cli("claude-code", "claude", ["claude", "mcp", "list"],
-                ["claude", "mcp", "add", "panel", "--", "python3", str(inst.SERVER)],
+                ["claude", "mcp", "add", "panel", "--", python, str(inst.SERVER)],
                 set(), dry)
 
     def test_pnl05_relocated_cli_registration_is_replaced(self):
@@ -160,6 +161,27 @@ class InstallerCliTests(unittest.TestCase):
         self.assertEqual(self.install(f'panel: python3 "{inst.SERVER}" - Connected')[0],
                          "ok")
         self.assertEqual([c[2] for c in self.calls], ["list"])
+
+    def test_pnl05_quoted_paths_with_status_separator_are_idempotent(self):
+        python = "/tools/python - stable/bin/python3"
+        server = "/projects/panel - copy/skills/panel/mcp_server.py"
+        for quote in ("'", '"'):
+            for status in ("", " - Connected", " - Failed - retry 'later"):
+                for dry in (False, True):
+                    with self.subTest(quote=quote, status=status, dry=dry):
+                        listing = f"panel: {quote}{python}{quote} {quote}{server}{quote}{status}"
+                        self.assertEqual(self.install(listing, dry, python, server)[0],
+                                         "ok")
+                        self.assertEqual([c[2] for c in self.calls], ["list"])
+
+    def test_pnl05_relocated_quoted_path_with_status_separator_is_replaced(self):
+        python = "/tools/python - stable/bin/python3"
+        server = "/projects/panel - copy/skills/panel/mcp_server.py"
+        listing = f'panel: "{python}" "/old/panel - copy/server.py" - Connected'
+        self.assertEqual(self.install(listing, python=python, server=server)[0],
+                         "updated")
+        self.assertEqual([c[2] for c in self.calls], ["list", "remove", "add"])
+        self.assertEqual(self.calls[-1][-2:], [python, server])
 
 
 class HttpBudgetTests(unittest.TestCase):

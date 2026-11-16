@@ -21,6 +21,7 @@ Existing launcher/config replacements are atomic with collision-safe backups;
 Codex and project MCP updates preserve fields other than command and args.
 CLI registration checks match the exact `panel` name and command/args; stale
 registrations are removed and re-added, while `--check` only reports them.
+Quoted paths containing ` - ` remain intact when parsing CLI status suffixes.
 MCP clients run `python3 <repo>/skills/panel/mcp_server.py`. Codex config:
 
 ```toml
