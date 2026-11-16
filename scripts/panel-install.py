@@ -27,7 +27,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import tomllib
+import uuid
 from pathlib import Path
 
 HOME = Path(__file__).resolve().parent.parent
@@ -100,11 +103,37 @@ def entry():
 
 
 def backup(path, done):
-    if path in done or not path.exists():
-        done.add(path)
+    if path in done or not (path.exists() or path.is_symlink()):
         return
-    shutil.copy2(path, path.with_suffix(path.suffix + f".bak-{STAMP}"))
+    suffix = 0
+    while True:
+        dest = path.with_name(path.name + f".bak-{STAMP}" +
+                              (f"-{suffix}" if suffix else ""))
+        try:
+            if path.is_symlink():
+                dest.symlink_to(os.readlink(path))
+            else:
+                with dest.open("xb") as out, path.open("rb") as source:
+                    shutil.copyfileobj(source, out)
+                shutil.copystat(path, dest)
+            break
+        except FileExistsError:
+            suffix += 1
     done.add(path)
+
+
+def write_atomic(path, text):
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                     dir=path.parent, delete=False) as out:
+        tmp = Path(out.name)
+        try:
+            out.write(text)
+            out.flush()
+            if path.exists():
+                shutil.copymode(path, tmp)
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
 
 
 def read_json(path):
@@ -141,7 +170,7 @@ def install_json(path, key, backups, dry):
         return ("update" if have else "add"), str(SERVER)
     backup(path, backups)
     data.setdefault(key, {})["panel"] = merged
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    write_atomic(path, json.dumps(data, indent=2) + "\n")
     return ("updated" if have else "added"), str(SERVER)
 
 
@@ -171,6 +200,23 @@ def install_codex(backups, dry):
     text = CODEX.read_text()
     existing = re.search(r"^\[mcp_servers\.panel\]\s*$(.*?)(?=^\[|\Z)",
                          text, re.S | re.M)
+    if existing:
+        # Parse complete TOML assignments, including multiline arrays/strings,
+        # and replace only command/args. Keep editor fields and nested tables.
+        lines = existing.group(1).splitlines(keepends=True)
+        kept, statement = [], ""
+        for line in lines:
+            statement += line
+            try:
+                fields = tomllib.loads(statement)
+            except tomllib.TOMLDecodeError:
+                continue
+            if not fields.keys() & {"command", "args"}:
+                kept.append(statement)
+            statement = ""
+        if statement:
+            return "unreadable", None
+        block += "".join(kept).lstrip("\n")
     if existing and existing.group(0).strip() == block.strip():
         return "ok", str(SERVER)
     if dry:
@@ -180,7 +226,7 @@ def install_codex(backups, dry):
         text = text[:existing.start()] + block + text[existing.end():]
     else:
         text = text.rstrip() + "\n\n" + block
-    CODEX.write_text(text)
+    write_atomic(CODEX, text)
     return ("updated" if existing else "added"), str(SERVER)
 
 
@@ -213,34 +259,37 @@ def install_cli(name, cmd, probe, add, backups, dry):
         return f"failed: {exc}", None
 
 
-def install_launcher(dry):
+def install_launcher(dry, backups=None):
     """`panel` on PATH, so a plain terminal is a first-class surface."""
     bindir = Path.home() / (".local/bin" if not WINDOWS else ".local\\bin")
     target = bindir / ("panel.cmd" if WINDOWS else "panel")
     if not dry:
         bindir.mkdir(parents=True, exist_ok=True)
+        backup(target, backups if backups is not None else set())
         if WINDOWS:
-            target.write_text(f'@echo off\r\n"{python_exe()}" "{LAUNCHER}" %*\r\n')
+            write_atomic(target, f'@echo off\r\n"{python_exe()}" "{LAUNCHER}" %*\r\n')
         else:
-            if target.exists() or target.is_symlink():
-                target.unlink()
-            target.symlink_to(LAUNCHER)
-            LAUNCHER.chmod(0o755)
+            tmp = bindir / f".panel-{uuid.uuid4().hex}"
+            try:
+                tmp.symlink_to(LAUNCHER)
+                os.replace(tmp, target)
+            finally:
+                tmp.unlink(missing_ok=True)
     on_path = str(bindir) in os.environ.get("PATH", "").split(os.pathsep)
     return ("ok" if target.exists() else "added"), str(target), on_path
 
 
-def write_project_mcp(project, dry):
+def write_project_mcp(project, dry, backups=None):
     path = Path(project).expanduser().resolve() / ".mcp.json"
     data = read_json(path) if path.exists() else {}
     if not isinstance(data, dict):
         # unparseable: keep the user's text instead of silently replacing it
-        if not dry:
-            backup(path, set())
         data = {}
-    data.setdefault("mcpServers", {})["panel"] = entry()
+    servers = data.setdefault("mcpServers", {})
+    servers["panel"] = {**(servers.get("panel") or {}), **entry()}
     if not dry:
-        path.write_text(json.dumps(data, indent=2) + "\n")
+        backup(path, backups if backups is not None else set())
+        write_atomic(path, json.dumps(data, indent=2) + "\n")
     return path
 
 
@@ -282,7 +331,7 @@ def main():
         state, _ = install_cli(name, cmd, probe, add, backups, dry)
         rows.append((name, state, None, cmd))
 
-    lstate, lpath, on_path = install_launcher(dry)
+    lstate, lpath, on_path = install_launcher(dry, backups)
     rows.append(("terminal (panel)", lstate, None, lpath))
 
     width = max(len(r[0]) for r in rows)
@@ -297,7 +346,7 @@ def main():
               f"{'' if state != 'absent' else f'  {DIM}{where}{RESET}'}")
 
     if args.project:
-        path = write_project_mcp(args.project, dry)
+        path = write_project_mcp(args.project, dry, backups)
         print(f"\n  project config {'would be ' if dry else ''}written: {path}")
 
     if not on_path:
