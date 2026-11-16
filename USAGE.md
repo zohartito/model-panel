@@ -240,10 +240,14 @@ the clones. A held-out check can ride in the test command
 
 ## Stopping a run
 
-Ctrl-C (or killing the process) stops every seat and its child processes
-within a second or two. Answers that already landed stay on disk, the summary
-is still written, and seats that never started stay owed, so
-`--resume <run dir>` picks up where it stopped. A second Ctrl-C quits at once.
+Ctrl-C (SIGINT) and SIGTERM initiate cleanup of CLI seats and their child
+processes, then attempt to write the summary. There is no universal one- or
+two-second bound: urllib HTTP I/O cannot be cancelled. After process cleanup,
+the hard-exit fallback waits `HARD_EXIT_AFTER` (20 seconds), then attempts to
+drain active work and save a summary before exiting; that cleanup adds time.
+Answers already saved stay on disk, and `--resume <run dir>` can refill
+missing seats. A second stop signal or SIGKILL exits without guaranteed
+cleanup or a final summary; child processes may remain after a force-kill.
 
 ## When to reach for it
 

@@ -251,8 +251,10 @@ Seat CLIs run in their own session and carry `PANEL_RUN_TOKEN`/`PANEL_SEAT_TOKEN
 in their environment; a timeout or a stop freezes (SIGSTOP) every process in
 the tree or carrying the token until a snapshot is stable, then kills them.
 Accepted limits: `.panel/residuals.md`. Ctrl-C/SIGTERM only
-set a flag; a reaper thread stops the seats, the run still writes its summary
-and exits 128+signal (a second Ctrl-C exits at once). stdin-capable CLIs
+set a flag; a reaper thread cleans up CLI seats and attempts a summary before
+exit 128+signal. HTTP I/O is uncancellable; the hard-exit fallback waits 20 s
+after reaping, plus drain/summary time. A second stop signal or SIGKILL gives
+no cleanup/summary guarantee. stdin-capable CLIs
 (claude, codex `-`, cursor-agent, opencode) take the prompt on stdin.
 Anything requiring exact money, geometry, safety limits, scoring, or pricing
 belongs in deterministic code; models orchestrate/judge.
