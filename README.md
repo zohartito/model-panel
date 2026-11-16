@@ -182,7 +182,7 @@ not have; copy it, delete what you do not use, and set `PANEL_SEATS`. Model ids 
 | Seat(s) | Reached through | You need |
 |---|---|---|
 | `claude-sonnet`, `claude-opus`, `claude-fable`, `claude-haiku` | `claude` CLI (Claude Code) | Signed in (`claude /login`). One lineage. |
-| `codex`, `codex-astra`, `codex-luna` | `codex` CLI (OpenAI) | Signed in. One lineage. `codex` runs with approvals and sandbox **off** inside `--repo`. |
+| `codex`, `codex-astra`, `codex-luna` | `codex` CLI (OpenAI) | Signed in. One lineage. All three run with approvals and sandbox **off**; `--repo` sets their working directory, not a filesystem boundary. |
 | `gemini`, `gemini-flash` | `gemini` CLI | Signed in or a Gemini API key in the CLI. |
 | `gemini-carbon`, `gemini-argon` | `opencode` CLI | A Google API key connected in OpenCode. Metered. Runs a read-only agent. |
 | `gemini-agy` | `agy` (Antigravity) CLI | Signed in. |
@@ -239,8 +239,9 @@ does the same (`--notify` posts macOS notifications only).
 - **Your code leaves your machine.** Each seat's provider sees what you send.
   Check each provider's data and training terms before sending private code;
   some free routes are explicitly public-context only.
-- **Some CLI seats can act on your files.** `codex` runs with its sandbox and
-  approvals bypassed in `--repo`, and `cursor-grok` runs with `-f`. Remove or
+- **Some CLI seats can act on your files.** `codex`, `codex-astra`, and
+  `codex-luna` run with sandbox and approvals bypassed. `--repo` sets their
+  working directory but does not confine access. `cursor-grok` runs with `-f`. Remove or
   edit those seats if that is not acceptable to you.
 - **Runs are slow.** Seats often take 10 to 40 minutes. Run it in the
   background (`panel bg ...`, the MCP `panel_run` tool, or `nohup`), and use
