@@ -17,6 +17,11 @@ clobbers (an editor's own fields survive), and skips surfaces you don't have.
 Run it again after moving the repo, upgrading Python, or setting up another
 machine. Windows works the same way, from wherever you cloned the repo.
 
+The terminal launcher needs `~/.local/bin` on PATH on macOS/Linux. If missing,
+run `export PATH="$HOME/.local/bin:$PATH"`, put that line in your shell's startup
+file, and open a new terminal or source that file. The installer only prints
+a hint; it does not change your shell profile.
+
 ## Surfaces the installer can wire
 
 | Surface | How you use it |

@@ -14,7 +14,9 @@ python3 scripts/panel-install.py --check   # report only
 python3 scripts/panel-install.py           # register installed surfaces
 ```
 
-Installer: backs up, merges, skips absent apps, adds `panel` to PATH.
+Installer: backs up, merges, skips absent apps, creates the `panel` launcher.
+On macOS/Linux, add `~/.local/bin` to PATH and refresh the shell if needed;
+the installer does not edit shell profiles (see README installation steps).
 Existing launcher/config replacements are atomic with collision-safe backups;
 Codex and project MCP updates preserve fields other than command and args.
 CLI registration checks match the exact `panel` name and command/args; stale

@@ -9,7 +9,8 @@ One command per machine, idempotent:
 
 It registers the MCP server in every config it finds (Claude Code, Codex,
 Cursor, VS Code, Windsurf, Zed, Gemini CLI, Qwen CLI, grok CLI, OpenCode,
-Claude Desktop) and puts a `panel` launcher on PATH for plain terminals.
+Claude Desktop) and creates a `panel` launcher under ~/.local/bin, which the
+user must add to PATH if needed.
 
 Rules it follows so it is safe to re-run:
   * every file is backed up once per run before it is touched

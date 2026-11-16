@@ -50,8 +50,14 @@ Optional, to use it from editors and agents:
 
 ```bash
 python3 scripts/panel-install.py --check   # report what it would change
-python3 scripts/panel-install.py           # register the MCP server and add `panel` to PATH
+python3 scripts/panel-install.py           # register MCP and create the panel launcher
 ```
+
+On macOS/Linux the launcher is `~/.local/bin/panel`. If that directory is
+not on PATH, run `export PATH="$HOME/.local/bin:$PATH"` in the current terminal
+and add the same line to your shell's startup file (`~/.zshrc` for zsh,
+`~/.bashrc` for interactive bash). Open a new terminal or source that file to
+refresh the shell. The installer prints a hint; it does not edit shell profiles.
 
 The installer backs up every file it touches, updates an existing `panel`
 entry instead of duplicating it, and skips apps you do not have. As a Claude
