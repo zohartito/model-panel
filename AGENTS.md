@@ -60,6 +60,13 @@ MCP: `panel_run`, `panel_status`, `panel_summary`, `panel_seat`, `panel_resume`,
 `panel_grade`, `panel_seats`, `panel_verdict`. Status: counts and paths; summary:
 findings. Read seats only when the summary points to them. `panel_verdict`
 records a reproduced finding: each seat's measured track record, per model.
+Optional `--verification-audits audits.json` / MCP `verification_audits` audits
+individual seats' verification claims separately from finding truth. Each audit
+binds an exact answer quote/span and SHA-256 to a reviewer rationale and run-local
+evidence quote/hash. Missing traces are unknown; only supported/contradicted
+claims enter the audited-contradiction rate. Latest assessment per claim wins;
+other seats' audits survive updates, old model pins remain historical. See
+USAGE.md for the schema. Offline coverage: `tests/test_verification_audits.py`.
 
 Answers save as they land. Refill failed/missing seats without repaying successes:
 `python3 "$PANEL" --resume last --repo /path/to/repo`.

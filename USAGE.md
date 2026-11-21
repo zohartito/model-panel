@@ -174,6 +174,62 @@ Every summary, `--list-seats` and `panel_seats` then show each seat's record
 (`track 7/9 confirmed, 2 solo`) for the model it actually ran; a model bump
 starts a fresh count. Solo = the only lineage that raised a confirmed finding.
 
+### Audit a seat's verification claim separately
+
+A correct shared finding does **not** establish that each seat performed the
+checks it claimed. Optionally add `--verification-audits audits.json` to the
+verdict command. The file is a JSON array; MCP `panel_verdict` accepts the same
+array as `verification_audits`, either alongside `finding`/`verdict` or inside
+each `verdicts` item:
+
+```json
+[{
+  "seat": "codex",
+  "answer_quote": "I ran the pager test.",
+  "answer_span": [120, 141],
+  "answer_sha256": "<64 lowercase hex characters>",
+  "assessment": "contradicted",
+  "rationale": "The captured test runner explicitly reports that this test was not run.",
+  "evidence": {
+    "path": "evidence/test-runner.txt",
+    "quote": "pager test: NOT RUN",
+    "sha256": "<64 lowercase hex characters>"
+  }
+}]
+```
+
+Replace the illustrative offsets and hashes with those of the actual files.
+`answer_span` is `[start, end)` in Unicode characters of the **complete**
+`<seat>.md` decoded as UTF-8, preserving CRLF (use `read_bytes().decode("utf-8")`,
+not newline-normalizing `read_text()`). Hash the complete raw file bytes with
+SHA-256. Evidence must be a UTF-8 file within the run directory; absolute paths,
+parent traversal and symlinks escaping the run are refused. Seat membership,
+quotes, spans and hashes are checked before either ledger is updated. A stale
+hash or mismatched quote is an error, not proof of contradiction.
+
+Assessments are reviewer judgments: `supported`, `contradicted`, or `unknown`.
+Panel validates citations, **not** their semantic entailment, trace completeness,
+file exposure, exhaustive inspection, or intent. Supply captured execution
+evidence; a missing trace or omitted `evidence` forces `unknown`. Absence of a
+recorded action is not itself a contradiction. No traces are collected or model
+calls made by this feature. Legacy claims without audits remain unassessed.
+
+The rate is `contradicted / (supported + contradicted)`, shown separately as
+`1/2 audited contradictions`; unknown and legacy claims are outside that
+denominator. Thus a shared confirmed finding can give seat A `1/1 audited
+contradictions` and seat B `verification unassessed` without changing either
+seat's finding-truth count. `panel_seats` also returns the supported,
+contradicted, unknown, assessed and prior counts under `track.verification`.
+
+A claim's stable ID binds the canonical run path, seat, answer hash and span.
+Re-auditing it replaces the assessment (even across findings); changing its
+rationale/evidence does not create another count. Omitted audits, including
+other seats' audits, survive updates; use `unknown` to retract an assessment.
+The ledgers retain the run-recorded model, never today's pin. Claims without a
+recorded model are unknown; old-model claims count only as prior. Artifact
+integrity is rechecked when scoring: deleted/changed artifacts become unknown,
+while the saved judgment and citations remain available for inspection.
+
 Two more lines can appear under the header. `SKIPPED as dead lanes`: the
 seat's last call failed on quota or login within 24 h, so the default and
 preset rosters leave it out (name it in `--seats`, or pass `--include-dead`).

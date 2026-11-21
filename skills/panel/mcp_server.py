@@ -45,6 +45,28 @@ def _str(desc):
     return {"type": "string", "description": desc}
 
 
+VERIFICATION_AUDITS = {
+    "type": "array",
+    "description": ("Optional per-seat verification claims, separate from finding truth. "
+                    "Missing evidence is unknown, never a contradiction."),
+    "items": {"type": "object", "properties": {
+        "seat": _str("A seat contributing to this finding."),
+        "answer_quote": _str("Exact verification claim in <seat>.md."),
+        "answer_span": {"type": "array", "items": {"type": "integer"},
+                        "minItems": 2, "maxItems": 2,
+                        "description": "[start, end) Unicode offsets in UTF-8 decoded file; preserve CRLF."},
+        "answer_sha256": _str("Lowercase SHA-256 of the complete answer file bytes."),
+        "assessment": {"type": "string", "enum": ["supported", "contradicted", "unknown"]},
+        "rationale": _str("Reviewer's explanation; absence of a trace is not contradiction."),
+        "evidence": {"type": "object", "properties": {
+            "path": _str("Run-relative UTF-8 evidence file, confined to the run directory."),
+            "quote": _str("Exact evidence quote."),
+            "sha256": _str("Lowercase SHA-256 of the complete evidence file bytes.")},
+            "required": ["path", "quote", "sha256"]}},
+        "required": ["seat", "answer_quote", "answer_span", "answer_sha256",
+                     "assessment", "rationale"]}}
+
+
 TOOLS = [
     {
         "name": "panel_run",
@@ -203,6 +225,7 @@ TOOLS = [
                 "verdict": {"type": "string",
                             "enum": ["confirmed", "rejected"]},
                 "note": _str("Optional: how you checked it."),
+                "verification_audits": VERIFICATION_AUDITS,
                 "verdicts": {"type": "array",
                              "description": "Several at once instead of "
                                             "finding/verdict.",
@@ -211,7 +234,8 @@ TOOLS = [
                                  "verdict": {"type": "string",
                                              "enum": ["confirmed",
                                                       "rejected"]},
-                                 "note": {"type": "string"}}}},
+                                 "note": {"type": "string"},
+                                 "verification_audits": VERIFICATION_AUDITS}}},
             },
             "required": ["run_dir"],
         },
@@ -449,15 +473,20 @@ def tool_panel_seats(_a):
 def tool_panel_verdict(a):
     items = a.get("verdicts") or [{"finding": a.get("finding"),
                                    "verdict": a.get("verdict"),
-                                   "note": a.get("note", "")}]
+                                   "note": a.get("note", ""),
+                                   "verification_audits": a.get("verification_audits")}]
     recorded = []
     for item in items:
         entry = panel.record_verdict(a["run_dir"], item.get("finding"),
-                                     item.get("verdict"), item.get("note", ""))
+                                     item.get("verdict"), item.get("note", ""),
+                                     verification_audits=item.get("verification_audits"))
         recorded.append({"finding": entry["finding"],
                          "verdict": entry["verdict"],
                          "seats": entry["seats"],
-                         "lineages": entry["lineages"]})
+                         "lineages": entry["lineages"],
+                         "verification_audits": [
+                             {k: audit[k] for k in ("id", "seat", "assessment")}
+                             for audit in entry.get("verification_audits", [])]})
     return {"run_dir": a["run_dir"], "recorded": recorded,
             "note": ("Each seat's confirmed/rejected record is shown in "
                      "panel_seats and next to its AA score in later "
