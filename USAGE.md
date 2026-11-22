@@ -126,7 +126,7 @@ this diff" — and the agent picks the tools up. What it's doing underneath:
 | `panel_resume` | Refill only the failed seats |
 | `panel_grade` | Score a run against an answer key |
 | `panel_seats` | The roster, each seat's lineage and measured track record |
-| `panel_verdict` | Record that a finding was reproduced (confirmed) or ruled out (rejected) |
+| `panel_verdict` | Record a finding as confirmed, rejected, or unresolved (reason required) |
 
 The intended loop is **run → poll → summary → drill into one seat → check it
 yourself → `panel_verdict`**. Don't let
@@ -146,7 +146,7 @@ _result.json   the same, machine-readable
 prompt.md      exactly what was sent
 run.json       what was planned, the models that ran (used by resume)
 _merge.json    the merge judge's proposals, keyed to the rows it saw
-_verdicts.json what you confirmed or rejected after checking
+_verdicts.json latest saved check outcomes and notes (including unresolved)
 ```
 
 Each consensus row has an id (`#3fa2c91b`). `4 (+2 likely)` means four
@@ -173,6 +173,27 @@ Verdicts go to `<run>/_verdicts.json` and `~/panel-runs/_track-record.jsonl`.
 Every summary, `--list-seats` and `panel_seats` then show each seat's record
 (`track 7/9 confirmed, 2 solo`) for the model it actually ran; a model bump
 starts a fresh count. Solo = the only lineage that raised a confirmed finding.
+
+If a check is missing or the evidence is inconclusive, record **unresolved**
+instead of guessing confirmed/rejected. A nonblank reason is required:
+
+```bash
+python3 <repo>/skills/panel/panel.py --verdict <run dir> --finding 3fa2c91b --mark unresolved --note "Need a clock fixture to reproduce expiry"
+```
+
+MCP `panel_verdict` accepts the same state and `note`, both singly and in
+`verdicts` batches; all reasons are validated before writing any batch items.
+The latest verdict replaces earlier credit: confirmed → unresolved removes
+confirmation credit, unresolved → confirmed counts once. Unresolved counts
+are separate from `confirmed / (confirmed + rejected)`, including solo credit;
+old-model verdicts remain `prior` rather than carrying over to a new model.
+
+Recording refreshes `_result.json` and `_summary.md` immediately. Each finding
+has `verification: {"state": "unreviewed", "note": ""}` until a verdict is saved;
+then its state and note reflect that check. Likely-merged rows keep their own
+verification and seat attribution. **Unreviewed** means no saved check, not
+inconclusive evidence. Verification never adds lineage votes, confirms a merge,
+or changes escalation policy.
 
 Two more lines can appear under the header. `SKIPPED as dead lanes`: the
 seat's last call failed on quota or login within 24 h, so the default and

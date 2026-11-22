@@ -189,11 +189,13 @@ TOOLS = [
     },
     {
         "name": "panel_verdict",
-        "description": ("Record whether a finding held up when you checked it "
-                        "yourself: confirmed (reproduced) or rejected "
-                        "(ruled out). Call this after reproducing, per hard "
-                        "rule 3. It builds each seat's measured track record "
-                        "on real work, which summaries and panel_seats show."),
+        "description": ("Record a finding's check outcome: confirmed "
+                        "(reproduced), rejected (ruled out), or unresolved "
+                        "(missing check or inconclusive evidence; a nonblank "
+                        "note is required). Verification is separate from "
+                        "lineage agreement. Unresolved never enters the "
+                        "confirmed/rejected ratio. Refreshes the run's "
+                        "JSON/Markdown and each seat's measured track record."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -201,17 +203,23 @@ TOOLS = [
                 "finding": _str("Finding id from the summary's first column, "
                                 "e.g. 3fa2c91b."),
                 "verdict": {"type": "string",
-                            "enum": ["confirmed", "rejected"]},
-                "note": _str("Optional: how you checked it."),
+                            "enum": ["confirmed", "rejected", "unresolved"]},
+                "note": _str("How you checked it. Required and nonblank for "
+                             "unresolved: explain the missing check or "
+                             "inconclusive evidence."),
                 "verdicts": {"type": "array",
                              "description": "Several at once instead of "
                                             "finding/verdict.",
                              "items": {"type": "object", "properties": {
                                  "finding": {"type": "string"},
                                  "verdict": {"type": "string",
-                                             "enum": ["confirmed",
-                                                      "rejected"]},
-                                 "note": {"type": "string"}}}},
+                                             "enum": ["confirmed", "rejected",
+                                                      "unresolved"]},
+                                 "note": _str("How you checked it. Required "
+                                              "and nonblank for unresolved: "
+                                              "explain the missing check or "
+                                              "inconclusive evidence.")},
+                                 "required": ["finding", "verdict"]}},
             },
             "required": ["run_dir"],
         },
@@ -450,18 +458,23 @@ def tool_panel_verdict(a):
     items = a.get("verdicts") or [{"finding": a.get("finding"),
                                    "verdict": a.get("verdict"),
                                    "note": a.get("note", "")}]
+    # Check every reason before the first write, even when a bad item is last.
+    for item in items:
+        panel.validate_verdict(item.get("verdict"), item.get("note", ""))
     recorded = []
     for item in items:
         entry = panel.record_verdict(a["run_dir"], item.get("finding"),
                                      item.get("verdict"), item.get("note", ""))
         recorded.append({"finding": entry["finding"],
                          "verdict": entry["verdict"],
+                         "note": entry["note"],
                          "seats": entry["seats"],
                          "lineages": entry["lineages"]})
     return {"run_dir": a["run_dir"], "recorded": recorded,
-            "note": ("Each seat's confirmed/rejected record is shown in "
-                     "panel_seats and next to its AA score in later "
-                     "summaries, for the model it ran.")}
+            "note": ("Each seat's confirmed/rejected ratio and separate "
+                     "unresolved count are shown in panel_seats and summaries, "
+                     "for the model it ran. This run's JSON/Markdown now show "
+                     "each finding's saved verification state and note.")}
 
 
 HANDLERS = {

@@ -927,6 +927,7 @@ class VerdictTests(TempRunCase):
         self.assertEqual(stats["a"]["confirmed"], 1)
         self.assertEqual(stats["a"]["rejected"], 1)
         self.assertEqual(stats["b"], {"confirmed": 1, "rejected": 0,
+                                      "unresolved": 0,
                                       "solo_confirmed": 0, "prior": 0})
         self.assertEqual(panel.track_label("a", stats), "1/2 confirmed")
         saved = json.loads((rundir / "_verdicts.json").read_text())
@@ -975,11 +976,172 @@ class VerdictTests(TempRunCase):
              "verdicts": [{"finding": ids["cache never expires"],
                            "verdict": "rejected"}]})
         self.assertEqual(out["recorded"][0]["verdict"], "rejected")
-        meta = json.loads((rundir / "run.json").read_text())
-        panel.collect_run(rundir, meta)
+        result = json.loads((rundir / "_result.json").read_text())
+        by_id = {f["id"]: f["verification"] for f in result["findings"]}
+        self.assertEqual(by_id[ids["cache never expires"]],
+                         {"state": "rejected", "note": ""})
+        self.assertEqual(by_id[ids["off by one in the pager"]]["state"], "confirmed")
         self.assertIn("track 1/2 confirmed",
                       (rundir / "_summary.md").read_text())
-        self.assertIn("models", meta)
+        self.assertIn("models", result["run"])
+
+    def test_unreviewed_is_explicit_and_distinct_from_unresolved(self):
+        rundir, _ = self.make_run()
+        result = json.loads((rundir / "_result.json").read_text())
+        for row in result["findings"]:
+            self.assertEqual(row["verification"],
+                             {"state": "unreviewed", "note": ""})
+        self.assertIn("unreviewed", (rundir / "_summary.md").read_text())
+        self.assertEqual(panel.track_record(), {})
+
+    def test_cli_unresolved_persists_reason_and_refreshes_both_outputs(self):
+        rundir, ids = self.make_run()
+        before = json.loads((rundir / "_result.json").read_text())
+        fid = ids["cache never expires"]
+        note = "Need a clock fixture | current evidence\nis inconclusive"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(panel.main([
+                "--verdict", str(rundir), "--finding", fid, "--mark",
+                "unresolved", "--note", note]), 0)
+        saved = json.loads((rundir / panel.VERDICTS_FILE).read_text())[fid]
+        self.assertEqual((saved["verdict"], saved["note"]), ("unresolved", note))
+        after = json.loads((rundir / "_result.json").read_text())
+        for old, row in zip(before["findings"], after["findings"]):
+            state = "unresolved" if row["id"] == fid else "unreviewed"
+            self.assertEqual(row.pop("verification"),
+                             {"state": state, "note": note if row["id"] == fid else ""})
+            old.pop("verification")
+            self.assertEqual(row, old)  # agreement, provenance, ids unchanged
+        summary = (rundir / "_summary.md").read_text()
+        self.assertIn("unresolved: Need a clock fixture \\| current evidence is inconclusive",
+                      summary)
+        self.assertIn("1 unresolved", summary)
+        self.assertNotIn("0/0 confirmed", summary)
+
+    def test_unresolved_reasons_are_validated_before_any_writes(self):
+        rundir, ids = self.make_run()
+        fid = ids["cache never expires"]
+        before = {p.relative_to(self.tmp): p.read_bytes()
+                  for p in self.tmp.rglob("*") if p.is_file()}
+        for note in ("", " \t\n", None, 123):
+            with self.subTest(note=note), self.assertRaisesRegex(ValueError, "nonblank note"):
+                panel.record_verdict(rundir, fid, "unresolved", note)
+        for args in ([], ["--note", " \t\n"]):
+            with self.subTest(args=args), self.assertRaisesRegex(SystemExit, "nonblank note"):
+                panel.main(["--verdict", str(rundir), "--finding", fid,
+                            "--mark", "unresolved", *args])
+        after = {p.relative_to(self.tmp): p.read_bytes()
+                 for p in self.tmp.rglob("*") if p.is_file()}
+        self.assertEqual(after, before)
+
+    def test_unresolved_never_enters_the_confirmation_denominator(self):
+        rundir, ids = self.make_run()
+        panel.record_verdict(rundir, ids["off by one in the pager"], "confirmed")
+        panel.record_verdict(rundir, ids["cache never expires"], "rejected")
+        before = panel.track_record()["a"]
+        # A separate run of the same seats contributes unresolved evidence,
+        # not another resolved vote, even though the finding ids are the same.
+        import shutil
+        other = self.tmp / "other-run"
+        shutil.copytree(rundir, other, ignore=shutil.ignore_patterns(
+            panel.VERDICTS_FILE, ".verdicts.lock"))
+        panel.record_verdict(other, ids["cache never expires"],
+                             "unresolved", "Need a controllable clock")
+        stats = panel.track_record()
+        self.assertEqual((stats["a"]["confirmed"], stats["a"]["rejected"],
+                          stats["a"]["unresolved"]), (1, 1, 1))
+        self.assertEqual(stats["a"]["confirmed"] / (stats["a"]["confirmed"] + stats["a"]["rejected"]),
+                         before["confirmed"] / (before["confirmed"] + before["rejected"]))
+        self.assertEqual(panel.track_label("a", stats), "1/2 confirmed, 1 unresolved")
+        self.assertEqual(stats["b"]["unresolved"], 0)
+
+    def test_executable_cli_records_unresolved_without_model_calls(self):
+        import subprocess
+        rundir, ids = self.make_run()
+        argv = [PY, str(ROOT / "skills/panel/panel.py"), "--verdict", str(rundir),
+                "--finding", ids["cache never expires"], "--mark", "unresolved"]
+        rejected = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("nonblank note", rejected.stderr)
+        self.assertFalse((rundir / panel.VERDICTS_FILE).exists())
+        accepted = subprocess.run(argv + ["--note", "Need a clock fixture"],
+                                  capture_output=True, text=True, timeout=15)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertIn("unresolved", accepted.stdout)
+        result = json.loads((rundir / "_result.json").read_text())
+        row = next(f for f in result["findings"] if f["id"] == ids["cache never expires"])
+        self.assertEqual(row["verification"],
+                         {"state": "unresolved", "note": "Need a clock fixture"})
+
+    def test_confirmed_unresolved_confirmed_replaces_credit_once(self):
+        rundir, ids = self.make_run()
+        fid = ids["cache never expires"]
+        panel.record_verdict(rundir, fid, "confirmed")
+        panel.record_verdict(rundir, fid, "unresolved", "Earlier check was inconclusive")
+        stats = panel.track_record()["a"]
+        self.assertEqual((stats["confirmed"], stats["solo_confirmed"],
+                          stats["unresolved"]), (0, 0, 1))
+        for _ in range(2):
+            panel.record_verdict(rundir, fid, "confirmed", "Clock fixture reproduces it")
+        stats = panel.track_record()["a"]
+        self.assertEqual((stats["confirmed"], stats["solo_confirmed"],
+                          stats["unresolved"]), (1, 1, 0))
+        result = json.loads((rundir / "_result.json").read_text())
+        row = next(f for f in result["findings"] if f["id"] == fid)
+        self.assertEqual(row["verification"],
+                         {"state": "confirmed", "note": "Clock fixture reproduces it"})
+
+    def test_unresolved_on_an_old_model_is_prior_not_current(self):
+        rundir, ids = self.make_run()
+        meta = json.loads((rundir / panel.RUN_META).read_text())
+        meta["models"]["a"] = "old-model"
+        (rundir / panel.RUN_META).write_text(json.dumps(meta))
+        panel.record_verdict(rundir, ids["cache never expires"],
+                             "unresolved", "Need the old environment")
+        with patch.dict(panel.REGISTRY, {"a": {"lineage": "x", "cmd": {
+                "argv": ["x", "-m", "new-model"]}}}):
+            stats = panel.track_record()["a"]
+        self.assertEqual((stats["unresolved"], stats["prior"]), (0, 1))
+
+    def test_mcp_single_and_batch_unresolved_refresh_summary(self):
+        rundir, ids = self.make_run()
+        for batch in (False, True):
+            item = {"finding": ids["cache never expires"], "verdict": "unresolved",
+                    "note": "Need a clock fixture" if not batch else "Fixture is inconclusive"}
+            args = {"run_dir": str(rundir), **({"verdicts": [item]} if batch else item)}
+            response = mcp_server.handle({"jsonrpc": "2.0", "id": 1,
+                "method": "tools/call", "params": {"name": "panel_verdict",
+                                                     "arguments": args}})
+            self.assertFalse(response["result"].get("isError"), response)
+            data = json.loads(response["result"]["content"][0]["text"])
+            self.assertEqual(data["recorded"][0]["note"], item["note"])
+            summary = mcp_server.tool_panel_summary({"run_dir": str(rundir)})["summary"]
+            self.assertIn("unresolved: " + item["note"], summary)
+            result = json.loads((rundir / "_result.json").read_text())
+            row = next(f for f in result["findings"] if f["id"] == item["finding"])
+            self.assertEqual(row["verification"], {"state": "unresolved", "note": item["note"]})
+        self.assertEqual(panel.track_record()["a"]["unresolved"], 1)
+
+    def test_mcp_invalid_reason_in_later_batch_item_prevents_all_writes(self):
+        rundir, ids = self.make_run()
+        before = {p.relative_to(self.tmp): p.read_bytes()
+                  for p in self.tmp.rglob("*") if p.is_file()}
+        for note in (None, "", " \n\t", 42):
+            for batch in (False, True):
+                item = {"finding": ids["cache never expires"], "verdict": "unresolved"}
+                if note is not None:
+                    item["note"] = note
+                args = {"run_dir": str(rundir), **({"verdicts": [
+                    {"finding": ids["off by one in the pager"], "verdict": "confirmed"}, item
+                ]} if batch else item)}
+                response = mcp_server.handle({"jsonrpc": "2.0", "id": 1,
+                    "method": "tools/call", "params": {"name": "panel_verdict",
+                                                         "arguments": args}})
+                self.assertTrue(response["result"]["isError"])
+                self.assertIn("nonblank note", response["result"]["content"][0]["text"])
+        after = {p.relative_to(self.tmp): p.read_bytes()
+                 for p in self.tmp.rglob("*") if p.is_file()}
+        self.assertEqual(after, before)
 
 
 class EscalationTests(TempRunCase):
@@ -1113,6 +1275,39 @@ class FinalReviewTests(TempRunCase):
                                           "groups": [[0, 1]]})
         record = panel._finding_record(out[0], {})
         self.assertEqual(record["likely_merged"][0]["severity"], "high")
+
+    def test_moved_row_verification_keeps_its_own_attribution(self):
+        rundir, _ = self.two_seat_run({
+            "a": findings_block([finding("pager drops the last page", severity="low")]),
+            "b": findings_block([finding("pagination loses its final chunk", severity="low")])
+        }, "--no-merge")
+        meta = json.loads((rundir / panel.RUN_META).read_text())
+        _, clusters, _, _ = panel.gather_run(rundir, meta)
+        self.assertEqual(len(clusters), 2)
+        (rundir / panel.MERGE_FILE).write_text(json.dumps({
+            "key": panel.cluster_key(clusters), "status": "applied", "groups": [[0, 1]]}))
+        before = panel.collect_run(rundir, meta)["findings"][0]
+        moved = before["likely_merged"][0]
+        panel.record_verdict(rundir, before["id"], "confirmed", "Primary check passed")
+        entry = panel.record_verdict(rundir, moved["id"], "unresolved", "Need pagination fixture")
+        self.assertEqual(entry["seats"], moved["seats"])
+        self.assertEqual(entry["lineages"], moved["lineages"])
+        after = json.loads((rundir / "_result.json").read_text())["findings"][0]
+        self.assertEqual(after["verification"]["state"], "confirmed")
+        self.assertEqual(after["likely_merged"][0]["verification"],
+                         {"state": "unresolved", "note": "Need pagination fixture"})
+        for key in ("id", "lineages", "likely_lineages", "seats", "severity", "claim"):
+            self.assertEqual(after[key], before[key])
+            self.assertEqual(after["likely_merged"][0][key], moved[key])
+        stats = panel.track_record()
+        self.assertEqual(stats["a"]["confirmed"], 1)
+        self.assertEqual(stats["a"]["unresolved"], 0)
+        self.assertEqual(stats["b"]["confirmed"], 0)
+        self.assertEqual(stats["b"]["unresolved"], 1)
+        summary = (rundir / "_summary.md").read_text()
+        moved_line = next(line for line in summary.splitlines()
+                          if f"← #{moved['id']}" in line)
+        self.assertIn("unresolved: Need pagination fixture", moved_line)
 
     def test_06_concurrent_verdicts_all_survive(self):
         import threading
