@@ -1231,6 +1231,13 @@ def _top_intelligence(seats, meta):
     return max(scores) if scores else None
 
 
+def _verification_label(cluster):
+    verification = cluster.get("verification") or {"state": "unreviewed"}
+    note = " ".join((verification.get("note") or "").split())
+    label = verification["state"] + (f": {note}" if note else "")
+    return label.replace("|", "\\|")
+
+
 def render_summary(outdir, meta, seat_results, clusters, no_vote,
                    registry=None, pending=None, merge_note=None):
     """_summary.md: the consensus table first, then every seat's bottom line.
@@ -1281,10 +1288,12 @@ def render_summary(outdir, meta, seat_results, clusters, no_vote,
         lines.append("Seats that share a lineage count once -- the Claude "
                      "seats together, both grok scaffolds together. "
                      "`lineages` is the number that matters; `+N likely` "
-                     "is the merge judge's proposal, NOT counted.")
+                     "is the merge judge's proposal, NOT counted. "
+                     "Verification is the saved check outcome, independent "
+                     "of agreement; unresolved is not a confirmed or rejected vote.")
         lines.append("")
-        lines.append("| id | lineages | severity | where | claim | seats | top AA |")
-        lines.append("| --- | ---: | --- | --- | --- | --- | ---: |")
+        lines.append("| id | lineages | severity | where | claim | seats | top AA | verification |")
+        lines.append("| --- | ---: | --- | --- | --- | --- | ---: | --- |")
         for c in clusters:
             claim = c["rep"]["claim"].replace("|", "\\|")
             top = _top_intelligence(c["seats"], meta)
@@ -1294,7 +1303,8 @@ def render_summary(outdir, meta, seat_results, clusters, no_vote,
             lines.append(f"| #{finding_id(c)} | {count} | {c['severity']} | "
                          f"{c['where']} | {claim} | "
                          f"{', '.join(c['seats'])} | "
-                         f"{'-' if top is None else top} |")
+                         f"{'-' if top is None else top} | "
+                         f"{_verification_label(c)} |")
         merged = [c for c in clusters if c.get("likely")]
         if merged:
             lines.append("")
@@ -1306,7 +1316,8 @@ def render_summary(outdir, meta, seat_results, clusters, no_vote,
                     lines.append(f"- #{finding_id(c)} ← #{finding_id(m)} "
                                  f"[{', '.join(m['lineages'])}] "
                                  f"{m['rep']['claim']} "
-                                 f"({', '.join(m['seats'])})")
+                                 f"({', '.join(m['seats'])}); verification: "
+                                 f"{_verification_label(m)}")
     else:
         lines.append("No machine-readable findings were emitted by any seat.")
     if merge_note and merge_note.get("status") in ("stale", "failed"):
@@ -1486,6 +1497,11 @@ def collect_run(outdir, meta, registry=None):
     reg = registry if registry is not None else REGISTRY
     seat_results, clusters, no_vote, pending = gather_run(outdir, meta, reg)
     assign_ids(clusters)
+    verdicts = _load_verdicts(outdir)
+    for c in clusters:
+        saved = verdicts.get(finding_id(c)) or {}
+        c["verification"] = {"state": saved.get("verdict", "unreviewed"),
+                             "note": saved.get("note", "")}
     rows, merge_note = apply_merge(clusters, _load_merge(outdir))
     render_summary(outdir, meta, seat_results, rows, no_vote, reg, pending,
                    merge_note)
@@ -1515,6 +1531,7 @@ def collect_run(outdir, meta, registry=None):
 
 def _finding_record(c, meta):
     return {"id": finding_id(c),
+            "verification": c.get("verification", {"state": "unreviewed", "note": ""}),
             "lineages": c["lineages"],
             # proposed by the merge judge, never counted in `lineages`
             "likely_lineages": c.get("likely_lineages", []),
@@ -1860,28 +1877,40 @@ def _runs_root():
     return Path(os.environ.get("PANEL_RUNS") or Path.home() / "panel-runs")
 
 
+def validate_verdict(verdict, note=""):
+    """Validate before any writes, including earlier items in an MCP batch."""
+    if verdict not in ("confirmed", "rejected", "unresolved"):
+        raise ValueError("verdict must be confirmed, rejected or unresolved")
+    if verdict == "unresolved" and (not isinstance(note, str) or not note.strip()):
+        raise ValueError("unresolved requires a nonblank note explaining the "
+                         "missing check or inconclusive evidence")
+    if not isinstance(note, str):
+        raise ValueError("note must be a string")
+
+
+def _load_verdicts(outdir):
+    try:
+        data = json.loads((Path(outdir) / VERDICTS_FILE).read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def record_verdict(run_dir, finding, verdict, note="", registry=None):
-    """Record that a finding was reproduced (confirmed) or ruled out
-    (rejected). Writes the run's _verdicts.json and appends one line to the
-    cross-run track record. Returns the entry."""
-    if verdict not in ("confirmed", "rejected"):
-        raise ValueError("verdict must be confirmed or rejected")
+    """Save a check outcome: confirmed, rejected, or unresolved with a reason.
+    Append the cross-run track event and refresh the run's JSON/Markdown.
+    Unresolved records never count as confirmation or rejection."""
+    validate_verdict(verdict, note)
     # one identity per run however the path is spelled (".", a symlink)
     run_dir = Path(run_dir).resolve()
     meta = json.loads((run_dir / RUN_META).read_text())
-    result = collect_run(run_dir, meta, registry)
+    _, clusters, _, _ = gather_run(run_dir, meta, registry)
+    assign_ids(clusters)
     fid = str(finding).lstrip("#")
-    hit = None
-    for row in result["findings"]:
-        if row["id"] == fid:
-            hit = row
-            break
-        for m in row["likely_merged"]:
-            if m["id"] == fid:  # a moved row is still its own seats' claim
-                hit = m
-                break
-        if hit:
-            break
+    # Look up the original row without writing outputs. A likely-merged row
+    # still belongs only to its own seats, never to the primary row's seats.
+    hit = next((_finding_record(c, meta) for c in clusters
+                if finding_id(c) == fid), None)
     if hit is None:
         raise ValueError(f"no finding #{fid} in {run_dir}; ids are in the "
                          f"first column of _summary.md")
@@ -1895,23 +1924,23 @@ def record_verdict(run_dir, finding, verdict, note="", registry=None):
     path = run_dir / VERDICTS_FILE
     with open(run_dir / ".verdicts.lock", "a") as lock:
         _lock_file(lock)  # read-modify-write: concurrent callers serialize
-        try:
-            verdicts = json.loads(path.read_text())
-        except (OSError, ValueError):
-            verdicts = {}
+        verdicts = _load_verdicts(run_dir)
         verdicts[fid] = entry
         _atomic_write(path, json.dumps(verdicts, indent=2))
-    track = _runs_root() / TRACK_FILE
-    track.parent.mkdir(parents=True, exist_ok=True)
-    with open(track, "a") as fh:
-        _lock_file(fh)
-        fh.write(json.dumps(entry) + "\n")
+        track = _runs_root() / TRACK_FILE
+        track.parent.mkdir(parents=True, exist_ok=True)
+        with open(track, "a") as fh:
+            _lock_file(fh)
+            fh.write(json.dumps(entry) + "\n")
+        # Keep revisions in the same order in both stores, and prevent a
+        # concurrent verdict writer from publishing an older summary last.
+        collect_run(run_dir, meta, registry)
     return entry
 
 
 def track_record(registry=None):
-    """{seat: {confirmed, rejected, solo_confirmed, prior}} over every
-    recorded verdict, latest verdict per finding. Counts belong to the model
+    """{seat: {confirmed, rejected, unresolved, solo_confirmed, prior}} over
+    recorded verdicts, latest verdict per finding. Counts belong to the model
     that answered: verdicts on an older pin are only tallied as `prior`."""
     reg = registry if registry is not None else REGISTRY
     latest = {}
@@ -1928,13 +1957,14 @@ def track_record(registry=None):
     for e in latest.values():
         for seat in e.get("seats") or []:
             s = stats.setdefault(seat, {"confirmed": 0, "rejected": 0,
+                                        "unresolved": 0,
                                         "solo_confirmed": 0, "prior": 0})
             model = (e.get("models") or {}).get(seat)
             current = seat_identity(reg.get(seat, {}))
             if model and current and model != current:
                 s["prior"] += 1
                 continue
-            if e.get("verdict") in ("confirmed", "rejected"):
+            if e.get("verdict") in ("confirmed", "rejected", "unresolved"):
                 s[e["verdict"]] += 1
                 if e["verdict"] == "confirmed" and e.get("solo"):
                     s["solo_confirmed"] += 1
@@ -1942,13 +1972,15 @@ def track_record(registry=None):
 
 
 def track_label(seat, stats):
-    """'7/9 confirmed (2 solo)', or '-' with nothing recorded."""
+    """Resolved-only ratio, plus a separate unresolved count when present."""
     s = (stats or {}).get(seat)
     total = (s["confirmed"] + s["rejected"]) if s else 0
+    unresolved = f"{s['unresolved']} unresolved" if s and s.get("unresolved") else ""
     if not total:
-        return "-"
+        return unresolved or "-"
     solo = f", {s['solo_confirmed']} solo" if s["solo_confirmed"] else ""
-    return f"{s['confirmed']}/{total} confirmed{solo}"
+    return (f"{s['confirmed']}/{total} confirmed{solo}"
+            + (f", {unresolved}" if unresolved else ""))
 
 
 def seat_status(outdir, name):
@@ -2476,11 +2508,13 @@ def build_parser():
                          "one-lineage high finding, too few lineages, or a "
                          "split verdict")
     ap.add_argument("--verdict", dest="verdict_dir",
-                    help="run dir whose finding you reproduced; with "
-                         "--finding ID --mark confirmed|rejected")
+                    help="run dir whose finding you checked; with "
+                         "--finding ID --mark confirmed|rejected|unresolved")
     ap.add_argument("--finding", help="finding id from _summary.md (#abc123)")
-    ap.add_argument("--mark", choices=("confirmed", "rejected"))
-    ap.add_argument("--note", default="", help="with --verdict: why")
+    ap.add_argument("--mark", choices=("confirmed", "rejected", "unresolved"))
+    ap.add_argument("--note", default="", help="with --verdict: how you checked; "
+                    "unresolved requires a nonblank reason for the missing "
+                    "check or inconclusive evidence")
     return ap
 
 
@@ -2520,7 +2554,7 @@ def _main(argv=None):
     if args.verdict_dir:
         if not (args.finding and args.mark):
             raise SystemExit("--verdict needs --finding <id> and "
-                             "--mark confirmed|rejected")
+                             "--mark confirmed|rejected|unresolved")
         try:
             entry = record_verdict(args.verdict_dir, args.finding, args.mark,
                                    args.note, registry)
@@ -2753,9 +2787,9 @@ def _main(argv=None):
               f"before acting.")
         print(f"Refill any seat that failed with: python3 "
               f"{Path(__file__).name} --resume {outdir}")
-        print(f"After reproducing a finding, record it: python3 "
+        print(f"After checking a finding, record it: python3 "
               f"{Path(__file__).name} --verdict {outdir} --finding <id> "
-              f"--mark confirmed|rejected")
+              f"--mark confirmed|rejected|unresolved")
     return 0
 
 

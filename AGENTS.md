@@ -36,7 +36,7 @@ python3 "$PANEL" --estimate                 # billing + P50/P95; launches nothin
 python3 "$PANEL" --estimate --no-metered    # subscription routes only
 python3 "$PANEL" --task "..." --preset strong
 python3 "$PANEL" --task "..." --escalate          # quick tier first, rest on doubt
-python3 "$PANEL" --verdict <run> --finding <id> --mark confirmed|rejected
+python3 "$PANEL" --verdict <run> --finding <id> --mark confirmed|rejected|unresolved
 ```
 
 `--preset` and `--seats` are mutually exclusive. Named rosters:
@@ -59,7 +59,12 @@ The first log line gives the run directory.
 MCP: `panel_run`, `panel_status`, `panel_summary`, `panel_seat`, `panel_resume`,
 `panel_grade`, `panel_seats`, `panel_verdict`. Status: counts and paths; summary:
 findings. Read seats only when the summary points to them. `panel_verdict`
-records a reproduced finding: each seat's measured track record, per model.
+records confirmed/rejected checks or `unresolved` with a nonblank `--note`
+explaining the missing check or inconclusive evidence (MCP: `note`, also in
+batches). Latest verdict wins per finding/model; unresolved is tallied separately,
+never in the confirmed/rejected ratio. Recording refreshes JSON/Markdown:
+findings, including likely-merged rows, carry `verification: {state, note}`;
+no saved record means `unreviewed`. Verification never changes lineage agreement.
 
 Answers save as they land. Refill failed/missing seats without repaying successes:
 `python3 "$PANEL" --resume last --repo /path/to/repo`.

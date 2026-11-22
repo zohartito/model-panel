@@ -130,9 +130,14 @@ block and restated its claims in one follow-up call), and `Escalation:` on a
 `--escalate` run (whether the quick tier was enough, and why).
 
 **After you check a finding, record it:** `panel_verdict` (MCP) or
-`panel.py --verdict <run> --finding <id> --mark confirmed|rejected`. That is
-each seat's measured track record on real work, per model; summaries and
-`panel_seats` show it as `track 7/9 confirmed, 2 solo` next to the AA score.
+`panel.py --verdict <run> --finding <id> --mark confirmed|rejected|unresolved`.
+Use `unresolved` with a nonblank `--note` (MCP: `note`) explaining a missing
+check or inconclusive evidence; it does not count as confirmed or rejected.
+That is each seat's measured track record on real work, per model; summaries
+and `panel_seats` show it as `track 7/9 confirmed, 2 solo, 1 unresolved` next to
+the AA score. JSON/Markdown refresh immediately with each finding's saved
+verification and note, including likely-merged rows; no record is `unreviewed`.
+Verification never changes lineage agreement.
 
 ## The seats
 
@@ -173,9 +178,10 @@ points at a different roster entirely. Full spec format: `AGENTS.md`.
    defects that don't exist (a seat once reported a resolver as "never
    updated" when three others and the test suite showed otherwise) and
    sometimes report bugs already fixed in a later round. If a finding is real,
-   you can write a failing test for it first. If you can't, it isn't real.
-   Either way, record the outcome with `panel_verdict`: it is the only measured
-   evidence of which seats are right.
+   write a failing test for it first. If you cannot establish it either way,
+   record `unresolved` with the missing check or inconclusive evidence, not
+   `rejected`. Record the outcome with `panel_verdict`: it is the measured
+   evidence of which seats are right and which checks remain open.
 4. **Fix, then re-panel.** One round is a snapshot, not a verdict. Fix every
    confirmed finding with a live repro before and a regression test after, then
    send the cumulative diff back with `--round N`. That injects the previous

@@ -7,7 +7,8 @@ have set up (each one is a "seat"), in parallel, and saves each answer the
 moment it arrives. Then it groups the findings by how many **independent model
 families** raised them, so three Claude models agreeing counts as one voice, not
 three. It also keeps a ledger: after you check a finding yourself, you mark it
-confirmed or rejected, and each seat builds a measured track record.
+confirmed, rejected, or unresolved (with a reason). Each seat builds a measured
+track record; unresolved checks stay separate from the confirmation ratio.
 
 panel does not decide anything for you. Its output is evidence you read and
 check before you act.
@@ -101,7 +102,7 @@ Each run gets its own directory, by default `~/panel-runs/<repo>/<timestamp>/`
 | `<seat>.md` | One seat's full answer, written as soon as it lands. |
 | `prompt.md` | Exactly what was sent. |
 | `run.json` | What was planned and which model each seat ran (used by `--resume`). |
-| `_verdicts.json` | Findings you marked confirmed or rejected. |
+| `_verdicts.json` | Latest confirmed/rejected/unresolved check outcomes and notes; both reports refresh when you record one. |
 
 Shared state lives in the run root: `_track-record.jsonl` (every verdict, per
 seat and model) and `_seat-health.json` (each seat's last outcome).

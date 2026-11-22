@@ -87,6 +87,16 @@ class ProtocolTests(unittest.TestCase):
         run = next(t for t in mcp_server.TOOLS if t["name"] == "panel_run")
         self.assertIn("preset", run["inputSchema"]["properties"])
 
+    def test_verdict_schema_offers_unresolved_for_single_and_batch(self):
+        schema = next(t for t in rpc("tools/list")["result"]["tools"]
+                      if t["name"] == "panel_verdict")["inputSchema"]
+        props = schema["properties"]
+        for fields in (props, props["verdicts"]["items"]["properties"]):
+            self.assertEqual(fields["verdict"]["enum"],
+                             ["confirmed", "rejected", "unresolved"])
+            self.assertIn("required", fields["note"]["description"].lower())
+            self.assertIn("unresolved", fields["note"]["description"])
+
     def test_panel_run_rejects_preset_plus_seats(self):
         resp = rpc("tools/call", {"name": "panel_run",
                                   "arguments": {"task": "x", "preset": "full",
