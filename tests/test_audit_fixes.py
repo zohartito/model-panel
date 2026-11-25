@@ -927,8 +927,12 @@ class VerdictTests(TempRunCase):
         self.assertEqual(stats["a"]["confirmed"], 1)
         self.assertEqual(stats["a"]["rejected"], 1)
         self.assertEqual(stats["b"], {"confirmed": 1, "rejected": 0,
-                                      "solo_confirmed": 0, "prior": 0})
-        self.assertEqual(panel.track_label("a", stats), "1/2 confirmed")
+                                      "solo_confirmed": 0, "prior": 0,
+                                      "verification": {"supported": 0,
+                                          "contradicted": 0, "unknown": 0,
+                                          "assessed": 0, "prior": 0}})
+        self.assertEqual(panel.track_label("a", stats),
+                         "1/2 confirmed; verification unassessed")
         saved = json.loads((rundir / "_verdicts.json").read_text())
         self.assertEqual(len(saved), 2)
 

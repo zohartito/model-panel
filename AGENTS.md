@@ -73,6 +73,13 @@ records a reproduced finding: each seat's measured track record, per model.
 Invalid grading input returns an MCP tool error and leaves the server running.
 `panel_seat` requires a safe name in the run.json roster and rejects symlink
 answers/manifests and paths outside the run directory.
+Optional `--verification-audits audits.json` / MCP `verification_audits` audits
+individual seats' verification claims separately from finding truth. Each audit
+binds an exact answer quote/span and SHA-256 to a reviewer rationale and run-local
+evidence quote/hash. Missing traces are unknown; only supported/contradicted
+claims enter the audited-contradiction rate. Latest assessment per claim wins;
+other seats' audits survive updates, old model pins remain historical. See
+USAGE.md for the schema. Offline coverage: `tests/test_verification_audits.py`.
 
 Answers save as they land. Refill failed/missing seats without repaying successes:
 `python3 "$PANEL" --resume last --repo /path/to/repo`.

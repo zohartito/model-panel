@@ -1897,14 +1897,105 @@ def _runs_root():
     return Path(os.environ.get("PANEL_RUNS") or Path.home() / "panel-runs")
 
 
-def record_verdict(run_dir, finding, verdict, note="", registry=None):
-    """Record that a finding was reproduced (confirmed) or ruled out
-    (rejected). Writes the run's _verdicts.json and appends one line to the
-    cross-run track record. Returns the entry."""
+def _audit_artifact(run_dir, path, quote, sha256):
+    """Validate a cited UTF-8 artifact. Absence is not contrary evidence."""
+    if not isinstance(path, str) or not path:
+        raise ValueError("audit artifact needs a run-relative path")
+    rel = Path(path.replace("\\", "/"))
+    root = Path(run_dir).resolve()
+    if (rel.is_absolute() or re.match(r"^[A-Za-z]:", path)
+            or ".." in rel.parts):
+        raise ValueError("audit artifact must stay inside the run directory")
+    artifact = (root / rel).resolve()
+    if not artifact.is_relative_to(root):
+        raise ValueError("audit artifact must stay inside the run directory")
+    if not isinstance(quote, str) or not quote.strip():
+        raise ValueError("audit artifact needs an exact nonempty quote")
+    if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        raise ValueError("audit artifact needs a lowercase SHA-256 hash")
+    try:
+        raw = artifact.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ValueError(f"cannot read audit artifact: {path}") from exc
+    if hashlib.sha256(raw).hexdigest() != sha256:
+        raise ValueError(f"stale audit artifact hash: {path}")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"audit artifact is not UTF-8: {path}") from exc
+    if quote not in text:
+        raise ValueError(f"audit quote does not match artifact: {path}")
+    return text
+
+
+def _validate_verification_audit(run_dir, audit, seats, models):
+    if not isinstance(audit, dict):
+        raise ValueError("each verification audit must be an object")
+    seat = audit.get("seat")
+    if (not isinstance(seat, str) or seat not in seats
+            or not re.fullmatch(r"[A-Za-z0-9_.-]+", seat)):
+        raise ValueError("verification audit seat must contribute to the finding")
+    assessment = audit.get("assessment")
+    if assessment not in ("supported", "contradicted", "unknown"):
+        raise ValueError("audit assessment must be supported, contradicted or unknown")
+    rationale = audit.get("rationale")
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise ValueError("verification audit needs a reviewer rationale")
+    quote, digest = audit.get("answer_quote"), audit.get("answer_sha256")
+    answer = _audit_artifact(run_dir, f"{seat}.md", quote, digest)
+    span = audit.get("answer_span")
+    if (not isinstance(span, list) or len(span) != 2
+            or any(type(n) is not int for n in span)
+            or not 0 <= span[0] < span[1] or answer is None
+            or answer[span[0]:span[1]] != quote or span[1] > len(answer)):
+        raise ValueError("audit answer_span must select the exact answer quote")
+    evidence = audit.get("evidence")
+    if evidence is not None:
+        if not isinstance(evidence, dict):
+            raise ValueError("audit evidence must be an object")
+        evidence = {k: evidence.get(k) for k in ("path", "quote", "sha256")}
+        trace = _audit_artifact(run_dir, evidence["path"], evidence["quote"],
+                                evidence["sha256"])
+    else:
+        trace = None
+    # One claim across findings, independent of assessment/evidence/rationale.
+    seed = json.dumps([str(Path(run_dir).resolve()), seat, digest, span])
+    return {"id": hashlib.sha256(seed.encode()).hexdigest(), "seat": seat,
+            "model": models.get(seat), "answer_quote": quote,
+            "answer_span": span, "answer_sha256": digest,
+            "assessment": assessment if trace is not None else "unknown",
+            "rationale": rationale, "evidence": evidence}
+
+
+def _verification_assessment(run_dir, audit):
+    """Deleted/changed artifacts never remain scored as contrary evidence."""
+    try:
+        checked = _validate_verification_audit(
+            run_dir, audit, [audit["seat"]], {audit["seat"]: audit.get("model")})
+        return checked["assessment"] if checked["id"] == audit["id"] else "unknown"
+    except (ValueError, KeyError, TypeError, OSError):
+        return "unknown"
+
+
+def record_verdict(run_dir, finding, verdict, note="", registry=None,
+                   verification_audits=None):
+    """Record finding truth, optionally auditing individual verification claims.
+    Audits never change finding truth or credit another seat's verification.
+    Writes the existing run and cross-run ledgers; returns the entry."""
     if verdict not in ("confirmed", "rejected"):
         raise ValueError("verdict must be confirmed or rejected")
     # one identity per run however the path is spelled (".", a symlink)
     run_dir = Path(run_dir).resolve()
+    with open(run_dir / ".verdicts.lock", "a") as lock:
+        _lock_file(lock)  # includes collect_run's summary refresh on Windows
+        return _record_verdict_locked(run_dir, finding, verdict, note, registry,
+                                      verification_audits)
+
+
+def _record_verdict_locked(run_dir, finding, verdict, note, registry,
+                           verification_audits):
     meta = json.loads((run_dir / RUN_META).read_text())
     result = collect_run(run_dir, meta, registry)
     fid = str(finding).lstrip("#")
@@ -1923,6 +2014,14 @@ def record_verdict(run_dir, finding, verdict, note="", registry=None):
         raise ValueError(f"no finding #{fid} in {run_dir}; ids are in the "
                          f"first column of _summary.md")
     models = meta.get("models") or {}
+    if verification_audits is None:
+        verification_audits = []
+    if not isinstance(verification_audits, list):
+        raise ValueError("verification_audits must be a list")
+    audits = [_validate_verification_audit(run_dir, a, hit["seats"], models)
+              for a in verification_audits]
+    if len({a["id"] for a in audits}) != len(audits):
+        raise ValueError("duplicate verification claim in one update")
     entry = {"ts": datetime.datetime.now().isoformat(timespec="seconds"),
              "run": str(run_dir), "finding": fid, "verdict": verdict,
              "note": note, "claim": hit["claim"], "seats": hit["seats"],
@@ -1930,16 +2029,24 @@ def record_verdict(run_dir, finding, verdict, note="", registry=None):
              "severity": hit.get("severity"), "mode": meta.get("mode"),
              "models": {s: models.get(s) for s in hit["seats"]}}
     path = run_dir / VERDICTS_FILE
-    with open(run_dir / ".verdicts.lock", "a") as lock:
-        _lock_file(lock)  # read-modify-write: concurrent callers serialize
-        try:
-            verdicts = json.loads(path.read_text())
-        except (OSError, ValueError):
-            verdicts = {}
-        verdicts[fid] = entry
-        _atomic_write(path, json.dumps(verdicts, indent=2))
+    try:
+        verdicts = json.loads(path.read_text())
+    except (OSError, ValueError):
+        verdicts = {}
+    previous = verdicts.get(fid, {}).get("verification_audits", [])
+    merged = {a["id"]: a for a in previous}
+    merged.update({a["id"]: a for a in audits})
+    if merged:
+        entry["verification_audits"] = list(merged.values())
+        # Replaying snapshots must not restore an older assessment of a
+        # claim also cited by another finding. Only these IDs were edited.
+        entry["verification_updates"] = [a["id"] for a in audits]
+    verdicts[fid] = entry
+    _atomic_write(path, json.dumps(verdicts, indent=2))
     track = _runs_root() / TRACK_FILE
     track.parent.mkdir(parents=True, exist_ok=True)
+    # The caller holds the run lock through append so both ledgers agree
+    # on update order, including concurrent audits from different seats.
     with open(track, "a") as fh:
         _lock_file(fh)
         fh.write(json.dumps(entry) + "\n")
@@ -1947,16 +2054,20 @@ def record_verdict(run_dir, finding, verdict, note="", registry=None):
 
 
 def track_record(registry=None):
-    """{seat: {confirmed, rejected, solo_confirmed, prior}} over every
-    recorded verdict, latest verdict per finding. Counts belong to the model
-    that answered: verdicts on an older pin are only tallied as `prior`."""
+    """Latest finding truth and independent verification-claim counts per seat.
+    Only supported/contradicted claims enter `verification.assessed`. Old pins
+    are historical (`prior`); legacy verdicts have no assessed claims."""
     reg = registry if registry is not None else REGISTRY
-    latest = {}
+    latest, latest_audits = {}, {}
     try:
         for line in (_runs_root() / TRACK_FILE).read_text().splitlines():
             try:
                 e = json.loads(line)
                 latest[(e["run"], e["finding"])] = e
+                for a in e.get("verification_audits", []):
+                    if (a["id"] in e.get("verification_updates", [])
+                            and a["seat"] in e.get("seats", [])):
+                        latest_audits[(e["run"], a["id"])] = a
             except (ValueError, KeyError, TypeError):
                 continue
     except OSError:
@@ -1975,17 +2086,39 @@ def track_record(registry=None):
                 s[e["verdict"]] += 1
                 if e["verdict"] == "confirmed" and e.get("solo"):
                     s["solo_confirmed"] += 1
+    for s in stats.values():
+        s["verification"] = dict(supported=0, contradicted=0, unknown=0,
+                                 assessed=0, prior=0)
+    for (run, _), a in latest_audits.items():
+        if a["seat"] not in stats:
+            continue
+        counts = stats[a["seat"]]["verification"]
+        current = seat_identity(reg.get(a["seat"], {}))
+        model = a.get("model")
+        if model and current and model != current:
+            counts["prior"] += 1
+            continue
+        # No run-recorded model means no model-specific verification score.
+        assessment = _verification_assessment(run, a) if model else "unknown"
+        counts[assessment] += 1
+        if assessment in ("supported", "contradicted"):
+            counts["assessed"] += 1
     return stats
 
 
 def track_label(seat, stats):
-    """'7/9 confirmed (2 solo)', or '-' with nothing recorded."""
+    """Finding truth and claim audits are separate, explicitly scoped rates."""
     s = (stats or {}).get(seat)
-    total = (s["confirmed"] + s["rejected"]) if s else 0
-    if not total:
+    if not s:
         return "-"
+    total = s["confirmed"] + s["rejected"]
     solo = f", {s['solo_confirmed']} solo" if s["solo_confirmed"] else ""
-    return f"{s['confirmed']}/{total} confirmed{solo}"
+    truth = f"{s['confirmed']}/{total} confirmed{solo}" if total else "-"
+    counts = s.get("verification", {})
+    assessed = counts.get("assessed", 0)
+    audit = (f"{counts['contradicted']}/{assessed} audited contradictions"
+             if assessed else "verification unassessed")
+    return f"{truth}; {audit}"
 
 
 def seat_status(outdir, name):
@@ -2525,6 +2658,9 @@ def build_parser():
     ap.add_argument("--finding", help="finding id from _summary.md (#abc123)")
     ap.add_argument("--mark", choices=("confirmed", "rejected"))
     ap.add_argument("--note", default="", help="with --verdict: why")
+    ap.add_argument("--verification-audits", type=Path,
+                    help="with --verdict: JSON file of per-seat verification "
+                         "claim audits (quote/span, hashes, evidence, rationale)")
     return ap
 
 
@@ -2557,6 +2693,8 @@ def _main(argv=None):
     if args.allow_unknown and not args.no_metered and not args.resume:
         raise SystemExit("--allow-unknown requires --no-metered")
 
+    if args.verification_audits and not args.verdict_dir:
+        raise SystemExit("--verification-audits requires --verdict")
     if args.list_seats:
         list_seats(registry)
         return 0
@@ -2566,9 +2704,11 @@ def _main(argv=None):
             raise SystemExit("--verdict needs --finding <id> and "
                              "--mark confirmed|rejected")
         try:
+            audits = (json.loads(args.verification_audits.read_text(encoding="utf-8"))
+                      if args.verification_audits else None)
             entry = record_verdict(args.verdict_dir, args.finding, args.mark,
-                                   args.note, registry)
-        except ValueError as exc:
+                                   args.note, registry, audits)
+        except (ValueError, OSError) as exc:
             raise SystemExit(str(exc))
         print(f"recorded #{entry['finding']} {entry['verdict']} for "
               f"{', '.join(entry['seats'])}: {entry['claim']}")
