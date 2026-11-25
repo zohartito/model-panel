@@ -19,6 +19,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+if sys.version_info < (3, 11):
+    raise SystemExit("panel requires Python 3.11 or newer")
+
 HOME = Path(__file__).resolve().parent.parent
 PANEL_PY = HOME / "skills" / "panel" / "panel.py"
 
