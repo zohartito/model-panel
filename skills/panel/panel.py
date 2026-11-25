@@ -73,6 +73,9 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+if sys.version_info < (3, 11):
+    raise SystemExit("panel requires Python 3.11 or newer")
+
 try:
     import fcntl  # POSIX file locks
 except ImportError:  # Windows
@@ -620,11 +623,51 @@ def _read_sse(resp, deadline):
                                      "reasoning_content": "".join(reasoning)}}]}
 
 
+def _http_response(req, streaming, deadline, read_timeout):
+    """Bound the entire urllib operation, including headers and body reads.
+
+    Socket timeouts alone reset with each read. urllib is not cancellable;
+    a daemon may finish draining later, but cannot publish a late answer.
+    """
+    done, result = threading.Event(), []
+
+    def read():
+        try:
+            try:
+                with urllib.request.urlopen(req, timeout=read_timeout) as resp:
+                    data = (_read_sse(resp, deadline) if streaming
+                            else json.loads(resp.read()))
+            except urllib.error.HTTPError as exc:
+                try:
+                    reason = exc.read(400).decode("utf-8", "replace").strip()
+                except Exception:  # noqa: BLE001
+                    reason = ""
+                finally:
+                    exc.close()
+                raise RuntimeError(f"{exc}: {reason}" if reason else str(exc))
+            result.append((True, data))
+        except Exception as exc:  # noqa: BLE001
+            result.append((False, exc))
+        finally:
+            done.set()
+
+    if time.monotonic() >= deadline:
+        raise RuntimeError("seat budget ran out")
+    threading.Thread(target=read, daemon=True).start()
+    if not done.wait(max(0, deadline - time.monotonic())):
+        raise RuntimeError("seat budget ran out")
+    ok, value = result[0]
+    if not ok:
+        raise value
+    return value
+
+
 def http_seat(specs, prompt, repo, timeout):
     """POST to each spec in turn until one yields text. Seats degrade, never
     raise: one unreachable provider must not take the panel down."""
     last = "no http spec"
     keys = []
+    deadline = time.monotonic() + timeout
     for spec in specs:
         if _STOPPING.is_set():
             return NOT_STARTED, "panel is stopping; seat not started"
@@ -640,31 +683,22 @@ def http_seat(specs, prompt, repo, timeout):
                          mapping)
         body = json.dumps(_subst(spec["body"], mapping)).encode()
         streaming = spec["body"].get("stream") is True
-        deadline = time.monotonic() + timeout
         data = None
         for attempt in range(1, (STREAM_ATTEMPTS if streaming else 1) + 1):
             if _STOPPING.is_set():
                 return NOT_STARTED, "panel is stopping; seat not started"
-            remaining = max(1, deadline - time.monotonic())
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                last = "seat budget ran out"
+                break
             try:
                 req = urllib.request.Request(_subst(spec["url"], mapping),
                                              data=body, headers=headers)
-                read_timeout = (min(STREAM_IDLE_TIMEOUT, remaining)
-                                if streaming else timeout)
-                with urllib.request.urlopen(req, timeout=read_timeout) as resp:
-                    data = (_read_sse(resp, deadline) if streaming
-                            else json.loads(resp.read()))
-                break
-            except urllib.error.HTTPError as exc:
-                # the status line alone hides "out of credit" behind a bare
-                # 401; the body says why. Never let the key ride along into a log.
-                try:
-                    reason = exc.read()[:400].decode("utf-8", "replace").strip()
-                except Exception:  # noqa: BLE001
-                    reason = ""
-                if key:
-                    reason = reason.replace(key, "[key]")
-                last = f"{exc}: {reason}" if reason else str(exc)
+                # Socket waits use whole seconds; the outer deadline retains
+                # exact subsecond precision across all retries/fallbacks.
+                read_timeout = min(timeout, math.ceil(remaining),
+                                   STREAM_IDLE_TIMEOUT if streaming else timeout)
+                data = _http_response(req, streaming, deadline, read_timeout)
                 break
             except Exception as exc:  # noqa: BLE001
                 last = str(exc)
@@ -684,7 +718,10 @@ def http_seat(specs, prompt, repo, timeout):
                 # reasoning and leave the answer field empty: surface the
                 # fallback rather than nothing, but say that is what happened.
                 note = "" if i == 0 else f"[fell back to `{path}`]\n\n"
-                return 0, note + text
+                answer = note + text
+                for known_key in keys:
+                    answer = answer.replace(known_key, "[key]")
+                return 0, answer
         last = f"no text at any of {paths}"
     # Every error path, not only HTTPError: a stream error or exception text
     # that echoes the key must not ride into the seat file or _result.json.
@@ -2499,6 +2536,24 @@ def grade(rundir, keypath, registry):
     return rows
 
 
+def seat_availability(entry):
+    """Resolve local wiring only; never infer successful live inference."""
+    if "cmd" in entry:
+        exe = entry["cmd"]["argv"][0]
+        if not shutil.which(exe):
+            return f"MISSING: {exe}"
+        for source in (entry["cmd"].get("env_from") or {}).values():
+            key, err = load_key(source)
+            if not key:
+                return err or "missing credentials"
+        return "configured"
+    if "http" in entry:
+        specs = entry["http"] if isinstance(entry["http"], list) else [entry["http"]]
+        key, err = load_key(specs[0].get("key_from"))
+        return "configured" if key or not specs[0].get("key_from") else err
+    return "unconfigured"
+
+
 def list_seats(registry):
     """Who is wired up on THIS machine, and whether the wiring resolves.
 
@@ -2511,18 +2566,7 @@ def list_seats(registry):
     rows = []
     for name, e in registry.items():
         kind = "cmd" if "cmd" in e else ("http" if "http" in e else "-")
-        if kind == "cmd":
-            exe = e["cmd"]["argv"][0]
-            reach = "configured" if shutil.which(exe) else f"MISSING: {exe}"
-            for source in (e["cmd"].get("env_from") or {}).values():
-                if reach == "configured" and not load_key(source)[0]:
-                    reach = load_key(source)[1]
-        elif kind == "http":
-            spec = e["http"] if isinstance(e["http"], list) else [e["http"]]
-            key, err = load_key(spec[0].get("key_from"))
-            reach = "configured" if (key or not spec[0].get("key_from")) else err
-        else:
-            reach = "unconfigured"
+        reach = seat_availability(e)
         last = health.get(name)
         if last and not last.get("ok"):
             err = " ".join(last.get("error", "").split())[:80]

@@ -4,6 +4,8 @@ One question → every wired frontier model in parallel → you synthesize.
 
 ## Install (or repair) every surface
 
+Use Python 3.11 or newer for the CLI, MCP server, installer, and offline tests.
+
 ```bash
 python3 <repo>/scripts/panel-install.py --check   # report only
 python3 <repo>/scripts/panel-install.py           # do it
@@ -15,12 +17,17 @@ clobbers (an editor's own fields survive), and skips surfaces you don't have.
 Run it again after moving the repo, upgrading Python, or setting up another
 machine. Windows works the same way, from wherever you cloned the repo.
 
+The terminal launcher needs `~/.local/bin` on PATH on macOS/Linux. If missing,
+run `export PATH="$HOME/.local/bin:$PATH"`, put that line in your shell's startup
+file, and open a new terminal or source that file. The installer only prints
+a hint; it does not change your shell profile.
+
 ## Surfaces the installer can wire
 
 | Surface | How you use it |
 |---|---|
 | **Terminal** (any shell) | `panel "question"` |
-| **Claude Code** | `/panel`, or just ask — the skill triggers itself |
+| **Claude Code** | ask it to use the panel MCP tools; `/panel` and the skill require the separate `claude plugin marketplace add zohartito/model-panel` and `claude plugin install panel@panel` commands |
 | **Codex CLI** | ask it to use the panel MCP tools |
 | **Cursor** (IDE + `cursor-agent`) | MCP tools available in chat |
 | **VS Code** | MCP tools in Copilot Chat agent mode |
@@ -143,11 +150,17 @@ A run lands in `~/panel-runs/<repo>/<timestamp>/`:
 _summary.md    consensus table + bottom lines   <- read this first
 _result.json   the same, machine-readable
 <seat>.md      one per model, written the moment it lands
-prompt.md      exactly what was sent
+prompt.md      initial prompt: all task seats; all diff seats except codex
+prompt.codex.md initial prompt for codex in diff mode (file-reference variant)
+reviewed.diff  saved diff, referenced by prompt.codex.md
 run.json       what was planned, the models that ran (used by resume)
 _merge.json    the merge judge's proposals, keyed to the rows it saw
 _verdicts.json what you confirmed or rejected after checking
 ```
+
+Only the seat literally named `codex` uses the variant; `codex-astra` and
+`codex-luna` receive `prompt.md`. Findings-block repair, when needed, is a
+separate follow-up request, not the saved initial prompt.
 
 Each consensus row has an id (`#3fa2c91b`). `4 (+2 likely)` means four
 lineages raised the claim and the merge judge thinks two more raised the same
@@ -251,8 +264,11 @@ because it reasons differently, and a finding with a repro beats any score.
 
 ## Quick answers and escalation
 
-`--preset quick` asks six lineages whose seats answer fastest (medians of
-1.5–5.5 minutes over 91 runs; no Claude seat, each has an 11+ minute median).
+`--preset quick` starts with six lineages and no Claude seat. It is intended
+as a responsive starting tier, but the current roster is not fully benchmarked:
+Carbon's speed on real panel prompts is still unmeasured. Historical medians
+from an earlier roster do not establish the current roster's speed; use
+`--estimate --preset quick` to inspect the timing history available locally.
 `--escalate` starts there and seats the rest of the default roster only when
 the quick tier leaves doubt: fewer than four lineages voted, a high-severity
 claim came from one lineage alone, or a diff review split between CLEAN and
@@ -280,10 +296,14 @@ the clones. A held-out check can ride in the test command
 
 ## Stopping a run
 
-Ctrl-C (or killing the process) stops every seat and its child processes
-within a second or two. Answers that already landed stay on disk, the summary
-is still written, and seats that never started stay owed, so
-`--resume <run dir>` picks up where it stopped. A second Ctrl-C quits at once.
+Ctrl-C (SIGINT) and SIGTERM initiate cleanup of CLI seats and their child
+processes, then attempt to write the summary. There is no universal one- or
+two-second bound: urllib HTTP I/O cannot be cancelled. After process cleanup,
+the hard-exit fallback waits `HARD_EXIT_AFTER` (20 seconds), then attempts to
+drain active work and save a summary before exiting; that cleanup adds time.
+Answers already saved stay on disk, and `--resume <run dir>` can refill
+missing seats. A second stop signal or SIGKILL exits without guaranteed
+cleanup or a final summary; child processes may remain after a force-kill.
 
 ## When to reach for it
 

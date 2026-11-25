@@ -12,7 +12,7 @@ confirmed or rejected, and each seat builds a measured track record.
 panel does not decide anything for you. Its output is evidence you read and
 check before you act.
 
-- Plain Python 3 standard library. No `pip install`.
+- Plain Python 3.11+ standard library. No `pip install`.
 - Works as a command-line tool, an MCP server (for Claude Code, Codex, Cursor,
   VS Code and other MCP clients), and a Claude Code plugin.
 - Seats are configuration (`skills/panel/seats.json`), not code. Adding a
@@ -21,7 +21,8 @@ check before you act.
 ## How it works
 
 1. You run `panel.py --task "question"` (or `--diff change.diff`).
-2. panel builds one prompt and sends it to every selected seat. A seat is
+2. panel builds a shared prompt; in diff mode, the seat named `codex` receives
+   a file-reference variant instead of the embedded diff (see artifacts below). A seat is
    either a **CLI** it runs as a subprocess (`claude`, `codex`, `gemini`, ...)
    or an **HTTP** endpoint it POSTs to (any OpenAI-style chat API, Ollama, ...).
 3. Each seat ends its answer with a short machine-readable findings block.
@@ -30,7 +31,7 @@ check before you act.
 
 ## Requirements
 
-- Python 3 (CI runs 3.12 and 3.13; this copy was also tested on 3.11).
+- Python 3.11 or newer (CI covers 3.11, 3.12 and 3.13).
 - macOS or Linux. Windows code paths exist but are only exercised in
   simulated tests so far (see `.panel/residuals.md`).
 - At least one model you can reach: a model CLI you are already signed in to,
@@ -50,8 +51,14 @@ Optional, to use it from editors and agents:
 
 ```bash
 python3 scripts/panel-install.py --check   # report what it would change
-python3 scripts/panel-install.py           # register the MCP server and add `panel` to PATH
+python3 scripts/panel-install.py           # register MCP and create the panel launcher
 ```
+
+On macOS/Linux the launcher is `~/.local/bin/panel`. If that directory is
+not on PATH, run `export PATH="$HOME/.local/bin:$PATH"` in the current terminal
+and add the same line to your shell's startup file (`~/.zshrc` for zsh,
+`~/.bashrc` for interactive bash). Open a new terminal or source that file to
+refresh the shell. The installer prints a hint; it does not edit shell profiles.
 
 The installer backs up every file it touches, updates an existing `panel`
 entry instead of duplicating it, and skips apps you do not have. As a Claude
@@ -99,9 +106,15 @@ Each run gets its own directory, by default `~/panel-runs/<repo>/<timestamp>/`
 | `_summary.md` | Consensus table (finding id, lineage count, severity, claim, seats) and each seat's bottom line. Read this first. |
 | `_result.json` | The same, machine-readable. `--json` also prints it. |
 | `<seat>.md` | One seat's full answer, written as soon as it lands. |
-| `prompt.md` | Exactly what was sent. |
+| `prompt.md` | The initial prompt for every task-mode seat and every diff-mode seat except `codex`. |
+| `prompt.codex.md` | In diff mode, the initial prompt for the seat literally named `codex`; it refers to `reviewed.diff` instead of embedding the diff. |
+| `reviewed.diff` | Copy of the diff being reviewed, saved in diff mode. |
 | `run.json` | What was planned and which model each seat ran (used by `--resume`). |
 | `_verdicts.json` | Findings you marked confirmed or rejected. |
+
+The `codex-astra` and `codex-luna` seats use `prompt.md`, like other seats.
+These files record initial prompts; optional findings-block repair is a
+separate follow-up request.
 
 Shared state lives in the run root: `_track-record.jsonl` (every verdict, per
 seat and model) and `_seat-health.json` (each seat's last outcome).
@@ -182,7 +195,7 @@ not have; copy it, delete what you do not use, and set `PANEL_SEATS`. Model ids 
 | Seat(s) | Reached through | You need |
 |---|---|---|
 | `claude-sonnet`, `claude-opus`, `claude-fable`, `claude-haiku` | `claude` CLI (Claude Code) | Signed in (`claude /login`). One lineage. |
-| `codex`, `codex-astra`, `codex-luna` | `codex` CLI (OpenAI) | Signed in. One lineage. `codex` runs with approvals and sandbox **off** inside `--repo`. |
+| `codex`, `codex-astra`, `codex-luna` | `codex` CLI (OpenAI) | Signed in. One lineage. All three run with approvals and sandbox **off**; `--repo` sets their working directory, not a filesystem boundary. |
 | `gemini`, `gemini-flash` | `gemini` CLI | Signed in or a Gemini API key in the CLI. |
 | `gemini-carbon`, `gemini-argon` | `opencode` CLI | A Google API key connected in OpenCode. Metered. Runs a read-only agent. |
 | `gemini-agy` | `agy` (Antigravity) CLI | Signed in. |
@@ -239,8 +252,9 @@ does the same (`--notify` posts macOS notifications only).
 - **Your code leaves your machine.** Each seat's provider sees what you send.
   Check each provider's data and training terms before sending private code;
   some free routes are explicitly public-context only.
-- **Some CLI seats can act on your files.** `codex` runs with its sandbox and
-  approvals bypassed in `--repo`, and `cursor-grok` runs with `-f`. Remove or
+- **Some CLI seats can act on your files.** `codex`, `codex-astra`, and
+  `codex-luna` run with sandbox and approvals bypassed. `--repo` sets their
+  working directory but does not confine access. `cursor-grok` runs with `-f`. Remove or
   edit those seats if that is not acceptable to you.
 - **Runs are slow.** Seats often take 10 to 40 minutes. Run it in the
   background (`panel bg ...`, the MCP `panel_run` tool, or `nohup`), and use

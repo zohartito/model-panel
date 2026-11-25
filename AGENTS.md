@@ -7,12 +7,22 @@ via MCP. Wiring lives in `skills/panel/seats.json`. Each run writes
 
 ## Install everywhere
 
+Python 3.11+ is required; the installer only registers a compatible interpreter.
+Pyenv shims must pass that version probe before replacing a versioned interpreter.
+
 ```bash
 python3 scripts/panel-install.py --check   # report only
 python3 scripts/panel-install.py           # register installed surfaces
 ```
 
-Installer: backs up, merges, skips absent apps, adds `panel` to PATH.
+Installer: backs up, merges, skips absent apps, creates the `panel` launcher.
+On macOS/Linux, add `~/.local/bin` to PATH and refresh the shell if needed;
+the installer does not edit shell profiles (see README installation steps).
+Existing launcher/config replacements are atomic with collision-safe backups;
+Codex and project MCP updates preserve fields other than command and args.
+CLI registration checks match the exact `panel` name and command/args; stale
+registrations are removed and re-added, while `--check` only reports them.
+Quoted paths containing ` - ` remain intact when parsing CLI status suffixes.
 MCP clients run `python3 <repo>/skills/panel/mcp_server.py`. Codex config:
 
 ```toml
@@ -45,7 +55,7 @@ python3 "$PANEL" --verdict <run> --finding <id> --mark confirmed|rejected
 - **trio**: claude-fable + codex + gemini-carbon.
 - **strong**: Fable + Astra + Gemini 4 Carbon + Grok + Kimi Pro + Muse CLI
   + free GLM/DeepSeek Flash. Eight lineages; ungraded.
-- **quick**: fastest measured seat of six lineages (no Claude). `--escalate`
+- **quick**: six-lineage starting tier (no Claude; current timings are not fully measured). `--escalate`
   starts here; the rest seat only on a 1-lineage high, <4 lineages, or split verdict.
 - **free**: Flash, Copilot Auto, free Nemotron/MiMo/GLM/DeepSeek and `local-27b`
   (Ollama on this machine).
@@ -60,6 +70,9 @@ MCP: `panel_run`, `panel_status`, `panel_summary`, `panel_seat`, `panel_resume`,
 `panel_grade`, `panel_seats`, `panel_verdict`. Status: counts and paths; summary:
 findings. Read seats only when the summary points to them. `panel_verdict`
 records a reproduced finding: each seat's measured track record, per model.
+Invalid grading input returns an MCP tool error and leaves the server running.
+`panel_seat` requires a safe name in the run.json roster and rejects symlink
+answers/manifests and paths outside the run directory.
 Optional `--verification-audits audits.json` / MCP `verification_audits` audits
 individual seats' verification claims separately from finding truth. Each audit
 binds an exact answer quote/span and SHA-256 to a reviewer rationale and run-local
@@ -84,6 +97,8 @@ rosters skip lanes that failed on quota/login in 24 h (`--include-dead`).
 Cmd seats get one Retry-After retry if the remaining budget allows it.
 Last outcomes: `$PANEL_RUNS/_seat-health.json`, surfaced in the roster.
 **Configured means CLI/key present, not successful live inference.**
+`panel_seats` and `--list-seats` share the wiring resolver; MCP rows include
+`configured`, `availability`, and a missing-configuration `reason`.
 
 `billing` is `subscription`, `metered`, `credit`, or `unknown` per seat.
 `--no-metered` excludes the latter three, including escalation and the merge
@@ -147,6 +162,11 @@ For CLI use `"cmd": {"argv": ["acme", "-p", "{prompt}"]}`.
   `[]` means first match in a list. Fallback answers are explicitly marked.
   `"stream": true` in a body reads SSE with a 180 s idle timeout and retries a
   stalled request (Model Studio sometimes accepts one and never answers).
+  All HTTP fallbacks/retries share one seat deadline, including body reads.
+  Uncancellable urllib I/O may drain in a daemon after timeout; late answers
+  are discarded and cannot write run artifacts.
+  Known HTTP keys are scrubbed from successful and failed answers, including
+  streaming and fallback results, before the caller can save them.
 - `default` selects a seat; `local` requires opt-in; `serial` prevents shared
   RAM contention. Set lineage correctly or the consensus count is false.
 - **Effort policy (2026-10-28): xhigh wherever the route offers it, never max.**
@@ -240,8 +260,10 @@ Seat CLIs run in their own session and carry `PANEL_RUN_TOKEN`/`PANEL_SEAT_TOKEN
 in their environment; a timeout or a stop freezes (SIGSTOP) every process in
 the tree or carrying the token until a snapshot is stable, then kills them.
 Accepted limits: `.panel/residuals.md`. Ctrl-C/SIGTERM only
-set a flag; a reaper thread stops the seats, the run still writes its summary
-and exits 128+signal (a second Ctrl-C exits at once). stdin-capable CLIs
+set a flag; a reaper thread cleans up CLI seats and attempts a summary before
+exit 128+signal. HTTP I/O is uncancellable; the hard-exit fallback waits 20 s
+after reaping, plus drain/summary time. A second stop signal or SIGKILL gives
+no cleanup/summary guarantee. stdin-capable CLIs
 (claude, codex `-`, cursor-agent, opencode) take the prompt on stdin.
 Anything requiring exact money, geometry, safety limits, scoring, or pricing
 belongs in deterministic code; models orchestrate/judge.
