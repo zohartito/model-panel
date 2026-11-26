@@ -91,6 +91,9 @@ Consensus counts **lineages, not seats**: Claude variants are one family,
 Grok behind two scaffolds is one, local Gemma and hosted Gemini are one.
 A merge judge (Haiku, `merge` block) proposes same-claim rows as `+N likely`:
 never counted; same-seat/different-place/negation guards hold (`--no-merge`).
+Rows the negation guard kept apart are linked as `contradiction_candidates`
+in `_result.json` and "Possible contradictions — verify" atop `_summary.md`:
+lexical hints, never verdicts or counts; moved rows keep their id.
 A blockless answer gets one follow-up for its block (`--no-repair`). Implicit
 rosters skip lanes that failed on quota/login in 24 h (`--include-dead`).
 `--file` embeds text; binary/media paths attach by reference (never bytes).
