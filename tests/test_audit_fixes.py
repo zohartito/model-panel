@@ -1464,5 +1464,116 @@ def tempfile_dir():
         shutil.rmtree(path, ignore_errors=True)
 
 
+class ContradictionLinkTests(TempRunCase):
+    """The negation guard keeps a claim and its denial apart; the run must
+    then show them as a possible contradiction, not two unrelated rows."""
+
+    HEADING = "## Possible contradictions — verify"
+    EXAMPLES = [  # the three dispute pairs ConsensusTests/FinalReviewTests pin
+        (finding("the lock is released on the error path", "db.py", 5),
+         finding("the lock is never released on the error path", "db.py", 5)),
+        (finding("the logger leaks the api key", "log.py", 4),
+         finding("the logger does not leak the api key", "log.py", 4)),
+        (finding("authorization check is missing from the delete handler",
+                 "h.py", 9),
+         finding("authorization check is not missing from the delete "
+                 "handler", "h.py", 9))]
+
+    def run_panel(self, answers, *extra):
+        self.use_seats({n: (lambda a: lambda p, r, t: a)(a)
+                        for n, a in answers.items()})
+        panel.main(["--task", "q", "--seats", ",".join(answers), "--out",
+                    str(self.tmp), "--repo", str(self.tmp), "--no-merge",
+                    *extra])
+        rundir = panel._latest_run(self.tmp)
+        return (rundir, json.loads((rundir / "_result.json").read_text()),
+                (rundir / "_summary.md").read_text())
+
+    def pair(self, x, y):
+        return self.run_panel({"a": (0, findings_block([x])),
+                               "b": (0, findings_block([y]))})
+
+    def test_each_known_dispute_yields_one_link_in_json_and_markdown(self):
+        for x, y in self.EXAMPLES:
+            with self.subTest(claim=x["claim"]):
+                _, result, md = self.pair(x, y)
+                ids = [f["id"] for f in result["findings"]]
+                self.assertEqual(len(ids), 2)
+                [link] = result["contradiction_candidates"]
+                self.assertEqual(link["kind"], "lexical")
+                self.assertEqual(sorted(link["ids"]), sorted(ids))
+                self.assertEqual(link["seats"], ["a", "b"])
+                self.assertEqual(link["claims"], [x["claim"], y["claim"]])
+                self.assertEqual([f["lineages"] for f in result["findings"]],
+                                 [["a"], ["b"]])
+                self.assertLess(md.index(self.HEADING), md.index("## Consensus"))
+                self.assertIn("Lexical hints, NOT established", md)
+                for fid in ids:
+                    self.assertIn(f"#{fid} ", md.split("## Consensus")[0])
+
+    def test_another_place_or_the_same_polarity_is_no_link(self):
+        controls = [
+            (finding("the lock is released on the error path", "db.py", 5),
+             finding("the lock is never released on the error path",
+                     "other.py", 5)),
+            (finding("buffer index bounds check is missing before memory "
+                      "access", "buf.c", 40),
+             finding("the lock is never released on the error path",
+                     "buf.c", 40))]
+        for x, y in controls:
+            with self.subTest(claim=y["claim"]):
+                _, result, md = self.pair(x, y)
+                self.assertEqual(result["contradiction_candidates"], [])
+                self.assertNotIn(self.HEADING, md)
+
+    def test_one_seats_own_two_claims_are_no_link(self):
+        x, y = self.EXAMPLES[0]
+        _, result, _ = self.run_panel({"a": (0, findings_block([x, y]))})
+        self.assertEqual(result["contradiction_candidates"], [])
+
+    def test_failed_and_no_vote_seats_contribute_none(self):
+        x, y = self.EXAMPLES[0]
+        _, result, _ = self.run_panel({
+            "a": (0, findings_block([x])), "b": (1, findings_block([y])),
+            "c": (0, f"prose: {y['claim']}")}, "--no-repair")
+        self.assertEqual(result["contradiction_candidates"], [])
+
+    def test_repeated_collection_gives_identical_links(self):
+        x, y = self.EXAMPLES[1]
+        rundir, first, _ = self.pair(x, y)
+        meta = json.loads((rundir / panel.RUN_META).read_text())
+        again = panel.collect_run(rundir, meta, panel.REGISTRY)
+        self.assertEqual(again["contradiction_candidates"],
+                         first["contradiction_candidates"])
+
+    def test_a_row_moved_under_likely_keeps_its_link(self):
+        x, y = self.EXAMPLES[0]
+        # the judge proposes moving the denial under an unrelated row
+        third = finding("connection pool size is hard-coded to ten")
+        rundir, _, _ = self.run_panel({"a": (0, findings_block([third])),
+                                       "b": (0, findings_block([x])),
+                                       "c": (0, findings_block([y]))})
+        meta = json.loads((rundir / panel.RUN_META).read_text())
+        _, clusters, _, _ = panel.gather_run(rundir, meta, panel.REGISTRY)
+        order = [c["seats"][0] for c in clusters]
+        (rundir / panel.MERGE_FILE).write_text(json.dumps({
+            "key": panel.cluster_key(clusters), "status": "applied",
+            "judge": "j", "model": "m",
+            "groups": [[order.index("a"), order.index("c")]]}))
+        result = panel.collect_run(rundir, meta, panel.REGISTRY)
+        [head] = [f for f in result["findings"] if f["likely_merged"]]
+        moved = head["likely_merged"][0]["id"]
+        [link] = result["contradiction_candidates"]
+        self.assertIn(moved, link["ids"])
+        self.assertEqual(link["rows"][link["ids"].index(moved)], head["id"])
+        md = (rundir / "_summary.md").read_text()
+        self.assertIn(f"#{moved} (under #{head['id']})", md)
+
+    def test_mcp_summary_shows_the_links(self):
+        rundir, _, _ = self.pair(*self.EXAMPLES[2])
+        out = mcp_server.tool_panel_summary({"run_dir": str(rundir)})
+        self.assertIn(self.HEADING, out["summary"])
+
+
 if __name__ == "__main__":
     unittest.main()

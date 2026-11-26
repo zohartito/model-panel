@@ -40,6 +40,8 @@ it showed work.
 
 **Contradictions** — where seats disagree about the same location or claim.
 Give both positions and what evidence each offered. Do not resolve them.
+Start from the summary's "Possible contradictions — verify" links (lexical
+hints: say which ones the seat files bear out), then add any it missed.
 
 **Checkable now** — findings that come with a concrete failure scenario, and
 the exact command or test that would settle each one. This is the most useful

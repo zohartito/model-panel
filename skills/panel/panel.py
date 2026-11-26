@@ -1141,6 +1141,37 @@ def _disputes(a, b):
     return _jaccard(_stem_tokens(a), _stem_tokens(b)) >= NEGATION_BAR
 
 
+def contradiction_candidates(clusters, registry=None):
+    """Pairs of rows the negation guard kept apart because one seat's claim
+    denies what another seat's asserts, at a place not known to differ.
+    Clustering already refuses to count these as agreement; this keeps
+    the disagreement visible instead of leaving it as two unrelated rows.
+    They are LEXICAL hints (polarity words plus shared vocabulary), not
+    established contradictions: the caller reproduces before trusting one.
+    One link per row pair, its first witness pair in clustering order, so
+    repeated collection of the same seat files gives identical links."""
+    reg = registry if registry is not None else REGISTRY
+    links = []
+    for i, a in enumerate(clusters):
+        for b in clusters[i + 1:]:
+            witness = next(
+                ((sa, x, sb, y)
+                 for sa, x in zip(a["seats"], a.get("members") or [a["rep"]])
+                 for sb, y in zip(b["seats"], b.get("members") or [b["rep"]])
+                 if sa != sb and _place_relation(x, y) != "different"
+                 and _disputes(x["claim"], y["claim"])), None)
+            if witness is None:
+                continue
+            sa, x, sb, y = witness
+            links.append({
+                "kind": "lexical", "ids": [finding_id(a), finding_id(b)],
+                "seats": [sa, sb],
+                "lineages": [lineage_of(sa, reg), lineage_of(sb, reg)],
+                "claims": [x["claim"], y["claim"]],
+                "where": [_where(x), _where(y)]})
+    return links
+
+
 def _best_cluster(clusters, seat, f):
     """The cluster this finding belongs to, or None.
 
@@ -1269,7 +1300,8 @@ def _top_intelligence(seats, meta):
 
 
 def render_summary(outdir, meta, seat_results, clusters, no_vote,
-                   registry=None, pending=None, merge_note=None):
+                   registry=None, pending=None, merge_note=None,
+                   contradictions=None):
     """_summary.md: the consensus table first, then every seat's bottom line.
 
     A seat that exited non-zero produced NO answer. Counting it as answered --
@@ -1311,6 +1343,26 @@ def render_summary(outdir, meta, seat_results, clusters, no_vote,
         lines.append("Findings block recovered by a follow-up call to the "
                      "same seat: " + ", ".join(repaired))
     lines.append("")
+
+    if contradictions:
+        lines.append("## Possible contradictions — verify")
+        lines.append("")
+        lines.append("Lexical hints, NOT established contradictions: one "
+                     "seat's claim uses near-identical words with the "
+                     "opposite polarity of another's, at a place not known "
+                     "to differ. Neither side is counted for the other. "
+                     "Reproduce before trusting either.")
+        lines.append("")
+        for link in contradictions:
+            rows = link.get("rows") or link["ids"]
+            sides = [f"#{fid}"
+                     + (f" (under #{row})" if row != fid else "")
+                     + f" {seat} [{lin}] @ {where}: {claim}"
+                     for fid, row, seat, lin, where, claim in zip(
+                         link["ids"], rows, link["seats"], link["lineages"],
+                         link["where"], link["claims"])]
+            lines.append("- " + "  VS  ".join(sides))
+        lines.append("")
 
     lines.append("## Consensus")
     lines.append("")
@@ -1523,9 +1575,16 @@ def collect_run(outdir, meta, registry=None):
     reg = registry if registry is not None else REGISTRY
     seat_results, clusters, no_vote, pending = gather_run(outdir, meta, reg)
     assign_ids(clusters)
+    links = contradiction_candidates(clusters, reg)
     rows, merge_note = apply_merge(clusters, _load_merge(outdir))
+    # a row the judge moved under another keeps its id; name the visible row
+    shown = {finding_id(c): finding_id(c) for c in rows}
+    shown.update({finding_id(m): finding_id(c)
+                  for c in rows for m in c.get("likely", [])})
+    for link in links:
+        link["rows"] = [shown.get(i, i) for i in link["ids"]]
     render_summary(outdir, meta, seat_results, rows, no_vote, reg, pending,
-                   merge_note)
+                   merge_note, links)
     result = {
         "run": meta,
         "dir": str(outdir),
@@ -1545,6 +1604,8 @@ def collect_run(outdir, meta, registry=None):
                    if seat_status(outdir, n) != (True, 0)],
         "merge": merge_note,
         "findings": [_finding_record(c, meta) for c in rows],
+        # lexical hints for the caller to verify, never a verdict
+        "contradiction_candidates": links,
     }
     _atomic_write(outdir / "_result.json", json.dumps(result, indent=2))
     return result
